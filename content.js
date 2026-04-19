@@ -1,8 +1,8 @@
-// ===== HH АВТО-ОТКЛИК v1.3 (СВОРАЧИВАЕМЫЕ НАСТРОЙКИ) =====
+// ===== HH АВТО-ОТКЛИК v1.3.1 (АВТОФИЛЬТР ДЛЯ ПРЯМЫХ ОТКЛИКОВ) =====
 (function() {
     'use strict';
     
-    console.log('=== HH Авто-отклик v1.3 ===');
+    console.log('=== HH Авто-отклик v1.3.1 ===');
     
     if (!window.location.href.includes('hh.ru')) {
         console.log('⚠️ Не страница HH.ru, скрипт не активирован');
@@ -29,7 +29,7 @@
             this.autoFilteredOrganizations = [];
             this.theme = 'dark';
             this.resumeSelectedFlag = false;
-            this.settingsCollapsed = true; // Настройки свернуты по умолчанию
+            this.settingsCollapsed = true;
             
             window.hhAutoResponder = this;
             
@@ -49,6 +49,7 @@
             }
             
             console.log('✅ HH Авто-отклик готов к работе!');
+            console.log('📋 Текущий автофильтр:', this.autoFilteredOrganizations);
             this.updateStatus('✅ Готов к работе на этой странице');
         }
         
@@ -131,13 +132,12 @@
                 transition: 'all 0.3s'
             });
             
-            // Стрелка для сворачивания настроек
             const settingsArrow = this.settingsCollapsed ? '▶' : '▼';
             
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.3</h3>
+                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.3.1</h3>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div style="display: flex; align-items: center; gap: 6px;">
@@ -173,7 +173,6 @@
                     </div>
                 </div>
                 
-                <!-- СВОРАЧИВАЕМЫЙ БЛОК НАСТРОЕК -->
                 <div style="margin-bottom: 10px;">
                     <div id="hh-settings-header" style="font-weight: bold; font-size: 13px; margin: 10px 0 5px 0; color: ${textColor}; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none;">
                         <span id="hh-settings-arrow" style="font-size: 14px; transition: transform 0.2s;">${settingsArrow}</span>
@@ -280,7 +279,6 @@
                 this.panel.style.display = 'none';
             });
             
-            // Сворачивание настроек
             const settingsHeader = document.getElementById('hh-settings-header');
             if (settingsHeader) {
                 settingsHeader.addEventListener('click', () => {
@@ -342,7 +340,7 @@
             document.getElementById('hh-auto-remember').addEventListener('change', (e) => {
                 this.settings.autoRememberOrganizations = e.target.checked;
                 this.saveSettings();
-                this.updateStatus(e.target.checked ? '✅ АВТОфильтр ВКЛЮЧЕН' : '⭕ АВТОфильтр выключен');
+                this.updateStatus(e.target.checked ? '✅ АВТОфильтр ВКЛЮЧЕН - организации будут добавляться автоматически' : '⭕ АВТОфильтр выключен');
             });
             
             document.getElementById('hh-letter').addEventListener('input', (e) => {
@@ -375,6 +373,7 @@
                 const text = e.target.value;
                 this.filteredOrganizations = text.split(',').map(org => org.trim()).filter(org => org.length > 0);
                 this.saveSettings();
+                console.log('📋 Обновлён ручной фильтр:', this.filteredOrganizations);
             });
             
             setInterval(() => this.updateCount(), 5000);
@@ -390,7 +389,6 @@
             }
             if (arrow) {
                 arrow.textContent = this.settingsCollapsed ? '▶' : '▼';
-                arrow.style.transform = this.settingsCollapsed ? 'rotate(0deg)' : 'rotate(90deg)';
             }
         }
         
@@ -469,47 +467,57 @@
             this.toggleButton.style.background = btnBg;
         }
         
-        // ===== ОСТАЛЬНЫЕ МЕТОДЫ (ТЕ ЖЕ, ЧТО И В v1.3.3) =====
-        // ... (getOrganizationName, isFilteredOrganization, addToAutoFilter, showAutoFilter, clearAutoFilter, closeChatIfOpened, getVacancyTitleFromModal, openResumeDropdown, closeResumeDropdown, getAllResumes, selectBestResume, processResponse, submitResponse, closeModal, updateStatus, updateStatsDisplay, updateCount, updateControlButtons, getAvailableButtons, isAlreadyRespondedVacancy, safeClick, processSingleVacancy, startAutoProcess, stopAutoProcess, testProcess, testFilter, analyzePage, clearHistory)
+        // ===== ПОЛУЧЕНИЕ НАЗВАНИЯ ОРГАНИЗАЦИИ =====
         
-        // Для краткости, остальные методы такие же как в v1.3.3
-        // Они будут добавлены ниже...
+        getCurrentOrganizationName() {
+            // Пытаемся получить название организации из открытой модалки прямого отклика
+            const directModal = document.querySelector('[role="alertdialog"][aria-modal="true"]');
+            if (directModal) {
+                // В модалке прямого отклика нет прямого указания организации,
+                // но мы можем получить её из карточки позже
+                return null;
+            }
+            return null;
+        }
         
-        getOrganizationName(button) {
-            const vacancyItem = button.closest('.vacancy-serp-item') || 
-                               button.closest('.serp-item') ||
-                               button.closest('[data-qa="vacancy-serp__vacancy"]');
-            if (!vacancyItem) return null;
+        getOrganizationNameFromCard(button) {
+            const vacancyCard = button.closest('[data-qa="vacancy-serp__vacancy"]') || 
+                               button.closest('.vacancy-card--n77Dj8TY8VIUF0yM') ||
+                               button.closest('[role="button"]');
             
-            const orgElement = vacancyItem.querySelector('[data-qa="vacancy-serp__vacancy-employer-text"]');
-            if (orgElement) {
-                let text = orgElement.textContent || orgElement.innerText || '';
+            if (!vacancyCard) return null;
+            
+            const orgText = vacancyCard.querySelector('[data-qa="vacancy-serp__vacancy-employer-text"]');
+            if (orgText) {
+                let text = orgText.textContent || orgText.innerText || '';
                 text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
                 if (text) return text;
             }
             
-            const employerLink = vacancyItem.querySelector('[data-qa="vacancy-serp__vacancy-employer"]');
+            const employerLink = vacancyCard.querySelector('[data-qa="vacancy-serp__vacancy-employer"]');
             if (employerLink) {
                 let text = employerLink.textContent || employerLink.innerText || '';
                 text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
                 if (text) return text;
             }
             
-            const magritteElements = vacancyItem.querySelectorAll('.magritte-text');
-            for (const element of magritteElements) {
-                let text = element.textContent || element.innerText || '';
-                text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
-                if (text && !text.includes('₽') && !text.includes('отклик') && !text.includes('просмотр') && text.length > 1 && text.length < 100) {
-                    return text;
+            const companyContainer = vacancyCard.querySelector('.company-name-badges-container--ofqQHaTYRFg0JM18');
+            if (companyContainer) {
+                const firstLink = companyContainer.querySelector('a');
+                if (firstLink) {
+                    let text = firstLink.textContent || firstLink.innerText || '';
+                    text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (text) return text;
                 }
             }
+            
             return null;
         }
         
         isFilteredOrganization(button) {
             if (!this.settings.filterOrganizations) return false;
             
-            const organizationName = this.getOrganizationName(button);
+            const organizationName = this.getOrganizationNameFromCard(button);
             if (!organizationName) return false;
             
             const orgNameNormalized = organizationName.replace(/\s+/g, ' ').toLowerCase().trim();
@@ -517,27 +525,35 @@
             for (const filter of this.filteredOrganizations) {
                 if (!filter || !filter.trim()) continue;
                 const filterNormalized = filter.toLowerCase().trim();
-                if (orgNameNormalized === filterNormalized || orgNameNormalized.includes(filterNormalized) || filterNormalized.includes(orgNameNormalized)) {
-                    console.log(`🚫 Фильтр: "${organizationName}" заблокирована`);
+                
+                if (orgNameNormalized === filterNormalized || 
+                    orgNameNormalized.includes(filterNormalized) || 
+                    filterNormalized.includes(orgNameNormalized)) {
+                    console.log(`🚫 РУЧНОЙ ФИЛЬТР: "${organizationName}" заблокирована`);
                     return true;
                 }
             }
             
-            if (this.settings.autoRememberOrganizations) {
+            if (this.settings.autoRememberOrganizations && this.autoFilteredOrganizations.length > 0) {
                 for (const autoFilter of this.autoFilteredOrganizations) {
                     if (!autoFilter || !autoFilter.trim()) continue;
                     const autoFilterNormalized = autoFilter.toLowerCase().trim();
-                    if (orgNameNormalized === autoFilterNormalized || orgNameNormalized.includes(autoFilterNormalized) || autoFilterNormalized.includes(orgNameNormalized)) {
-                        console.log(`🚫 Автофильтр: "${organizationName}" заблокирована`);
+                    
+                    if (orgNameNormalized === autoFilterNormalized || 
+                        orgNameNormalized.includes(autoFilterNormalized) || 
+                        autoFilterNormalized.includes(orgNameNormalized)) {
+                        console.log(`🚫 АВТОФИЛЬТР: "${organizationName}" заблокирована (была добавлена ранее)`);
                         return true;
                     }
                 }
             }
+            
             return false;
         }
         
         addToAutoFilter(organizationName) {
             if (!organizationName) return false;
+            if (!this.settings.autoRememberOrganizations) return false;
             
             const orgNameTrimmed = organizationName.trim();
             if (!orgNameTrimmed) return false;
@@ -545,23 +561,27 @@
             const orgNameLower = orgNameTrimmed.toLowerCase();
             const alreadyExists = this.autoFilteredOrganizations.some(org => org.toLowerCase() === orgNameLower);
             
-            if (alreadyExists) return false;
+            if (alreadyExists) {
+                console.log(`⚠️ Организация "${orgNameTrimmed}" уже в автофильтре`);
+                return false;
+            }
             
             this.autoFilteredOrganizations.push(orgNameTrimmed);
             this.saveSettings();
-            console.log(`🤖 Добавлено в автофильтр: "${orgNameTrimmed}"`);
+            console.log(`🤖 ДОБАВЛЕНО В АВТОФИЛЬТР: "${orgNameTrimmed}" (теперь в списке: ${this.autoFilteredOrganizations.length} организаций)`);
             return true;
         }
         
         showAutoFilter() {
             if (this.autoFilteredOrganizations.length === 0) {
-                this.updateStatus('Автофильтр пуст');
+                this.updateStatus('🤖 Автофильтр пуст');
                 return;
             }
-            let message = `АВТОФИЛЬТР (всего: ${this.autoFilteredOrganizations.length}):\n\n`;
+            let message = `🤖 АВТОФИЛЬТР (всего: ${this.autoFilteredOrganizations.length}):\n\n`;
             this.autoFilteredOrganizations.forEach((org, index) => { message += `${index + 1}. ${org}\n`; });
             message += `\n⚠️ Эти организации будут автоматически пропускаться в будущем.`;
             this.updateStatus(message);
+            console.log(message);
         }
         
         clearAutoFilter() {
@@ -581,7 +601,6 @@
             try {
                 let closeButton = document.querySelector('[data-qa="chatik-close-chatik"]');
                 if (closeButton && closeButton.offsetParent !== null) {
-                    console.log('🚫 Закрываем чат (data-qa)');
                     closeButton.click();
                     await this.wait(500);
                     return true;
@@ -591,31 +610,62 @@
                 if (chatRoot) {
                     const closeBtn = chatRoot.querySelector('button[aria-label="close"], button[aria-label="Закрыть"]');
                     if (closeBtn) {
-                        console.log('🚫 Закрываем чат (aria-label)');
                         closeBtn.click();
                         await this.wait(500);
                         return true;
                     }
                 }
-                
-                const allButtons = document.querySelectorAll('button');
-                for (const btn of allButtons) {
-                    const svg = btn.querySelector('svg');
-                    if (svg) {
-                        const svgPath = svg.innerHTML;
-                        if (svgPath && (svgPath.includes('M18 6L6 18') || svgPath.includes('M6 6L18 18'))) {
-                            console.log('🚫 Закрываем чат (иконка крестика)');
-                            btn.click();
-                            await this.wait(500);
-                            return true;
-                        }
-                    }
-                }
                 return false;
             } catch (e) {
-                console.log('Ошибка при закрытии чата:', e);
                 return false;
             }
+        }
+        
+        async checkAndCloseDirectResponseModal(organizationName) {
+            const directModal = document.querySelector('[role="alertdialog"][aria-modal="true"]');
+            
+            let isDirect = false;
+            if (directModal) {
+                const title = directModal.querySelector('[data-qa="title"]');
+                if (title && title.textContent.includes('прямым откликом')) {
+                    isDirect = true;
+                }
+            }
+            
+            if (!isDirect) {
+                const modalTitle = document.querySelector('[data-qa="magritte-alert-title"]');
+                if (modalTitle && modalTitle.textContent.includes('прямым откликом')) {
+                    isDirect = true;
+                }
+            }
+            
+            if (isDirect) {
+                console.log(`🚫 Прямой отклик (переход на сайт) для "${organizationName}" - пропускаем и добавляем в автофильтр`);
+                
+                // Добавляем организацию в автофильтр
+                if (organizationName && this.settings.autoRememberOrganizations) {
+                    this.addToAutoFilter(organizationName);
+                }
+                
+                const cancelBtn = document.querySelector('[data-qa="vacancy-response-link-advertising-cancel"]');
+                if (cancelBtn) {
+                    cancelBtn.click();
+                    await this.wait(500);
+                    return true;
+                }
+                
+                const closeBtn = document.querySelector('[aria-label="Закрыть"]');
+                if (closeBtn) {
+                    closeBtn.click();
+                    await this.wait(500);
+                    return true;
+                }
+                
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+                await this.wait(500);
+                return true;
+            }
+            return false;
         }
         
         getVacancyTitleFromModal() {
@@ -631,20 +681,7 @@
                 if (element) {
                     const title = element.textContent.trim();
                     if (title && title.length > 2 && title.length < 200 && !title.includes('Отклик')) {
-                        console.log('Название вакансии из модалки:', title);
                         return title;
-                    }
-                }
-            }
-            
-            const modal = document.querySelector('[role="dialog"]');
-            if (modal) {
-                const textElements = modal.querySelectorAll('.magritte-text_style-secondary');
-                for (const el of textElements) {
-                    const text = el.textContent.trim();
-                    if (text && text.length > 3 && text.length < 200 && !text.includes('Отклик') && !text.includes('руб')) {
-                        console.log('Название вакансии (альт):', text);
-                        return text;
                     }
                 }
             }
@@ -652,7 +689,6 @@
         }
         
         async openResumeDropdown() {
-            console.log('Открываем список резюме...');
             const resumeCard = document.querySelector('[data-qa="resume-title"]');
             if (resumeCard) {
                 const clickable = resumeCard.closest('[role="button"], [tabindex="0"]');
@@ -661,12 +697,10 @@
                     await this.wait(600);
                     const dropdown = document.querySelector('[role="listbox"]');
                     if (dropdown && dropdown.offsetParent !== null) {
-                        console.log('Список резюме открыт');
                         return true;
                     }
                 }
             }
-            console.log('Не удалось открыть список резюме');
             return false;
         }
         
@@ -700,18 +734,13 @@
         async selectBestResume(vacancyTitle) {
             if (!this.settings.autoSelectResume || !vacancyTitle) return false;
             
-            console.log(`🎯 Выбор резюме для вакансии: "${vacancyTitle}"`);
-            console.log(`📊 Порог совпадения: ${this.settings.resumeTitleMatching}%`);
-            
             const opened = await this.openResumeDropdown();
             if (!opened) return false;
             
             await this.wait(500);
             const resumes = await this.getAllResumes();
-            console.log(`📋 Найдено резюме: ${resumes.length}`);
             
             if (resumes.length <= 1) {
-                console.log('Только одно резюме, переключение не нужно');
                 await this.closeResumeDropdown();
                 return false;
             }
@@ -720,10 +749,7 @@
             let bestScore = 0;
             
             for (const resume of resumes) {
-                if (resume.isSelected) {
-                    console.log(`  📌 Текущее: "${resume.title}" (уже выбрано)`);
-                    continue;
-                }
+                if (resume.isSelected) continue;
                 
                 const vacancyLower = vacancyTitle.toLowerCase();
                 const resumeLower = resume.title.toLowerCase();
@@ -754,31 +780,33 @@
                     if (vacancyWords.length > 0) score = (matches / vacancyWords.length) * 100;
                 }
                 
-                console.log(`  "${resume.title}" → ${Math.round(score)}%`);
                 if (score > bestScore) {
                     bestScore = score;
                     bestMatch = resume;
                 }
             }
             
-            console.log(`🏆 Лучшее совпадение: ${bestMatch ? bestMatch.title : 'нет'} (${Math.round(bestScore)}%)`);
-            console.log(`🎯 Порог: ${this.settings.resumeTitleMatching}%`);
-            
             if (bestMatch && bestScore >= this.settings.resumeTitleMatching) {
-                console.log(`✅ ВЫБИРАЕМ: "${bestMatch.title}" (${Math.round(bestScore)}% >= ${this.settings.resumeTitleMatching}%)`);
                 bestMatch.element.click();
                 await this.wait(500);
                 await this.closeResumeDropdown();
                 return true;
             }
             
-            console.log(`❌ Не выбрано: ${Math.round(bestScore)}% < ${this.settings.resumeTitleMatching}%`);
             await this.closeResumeDropdown();
             return false;
         }
         
-        async processResponse() {
+        async processResponse(organizationName) {
             console.log('🔄 Обработка отклика...');
+            
+            // Проверяем прямой отклик и добавляем организацию в автофильтр
+            const isDirectModal = await this.checkAndCloseDirectResponseModal(organizationName);
+            if (isDirectModal) {
+                this.stats.skipped++;
+                this.updateStatsDisplay();
+                return false;
+            }
             
             for (let i = 0; i < 3; i++) {
                 await this.closeChatIfOpened();
@@ -798,8 +826,6 @@
             const textarea = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
             
             if (textarea) {
-                console.log('📝 Найдено поле для письма');
-                
                 if (!this.settings.skipCoverLetter) {
                     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
                     if (nativeSetter) {
@@ -810,20 +836,16 @@
                         textarea.value = this.coverLetter;
                         textarea.dispatchEvent(new Event('input', { bubbles: true }));
                     }
-                    this.updateStatus('📝 Письмо добавлено');
                     await this.wait(500);
                 }
-                
                 return await this.submitResponse();
             }
             
             const addLetterButton = document.querySelector('[data-qa="add-cover-letter"]');
-            
             if (addLetterButton && !this.settings.skipCoverLetter) {
-                console.log('📝 Нажимаем "Добавить сопроводительное"');
                 addLetterButton.click();
                 await this.wait(800);
-                return await this.processResponse();
+                return await this.processResponse(organizationName);
             }
             
             const relocationButton = document.querySelector('[data-qa="relocation-warning-confirm"]') ||
@@ -831,46 +853,26 @@
                                          btn.textContent && btn.textContent.trim() === 'Все равно откликнуться');
             
             if (relocationButton) {
-                console.log('📍 Подтверждаем переезд');
                 relocationButton.click();
                 await this.wait(800);
-                return await this.processResponse();
+                return await this.processResponse(organizationName);
             }
             
             return await this.submitResponse();
         }
         
         async submitResponse() {
-            console.log('📤 Отправка отклика...');
-            this.updateStatus('📤 Отправляем...');
+            let submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])');
+            if (!submitButton) submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
+            if (!submitButton) return false;
             
-            try {
-                let submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])');
-                if (!submitButton) submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                if (!submitButton) {
-                    console.log('Кнопка отправки не найдена');
-                    return false;
-                }
-                
-                if (submitButton.hasAttribute('disabled')) {
-                    console.log('Кнопка заблокирована, ждём...');
-                    await this.wait(1000);
-                }
-                
-                submitButton.click();
-                await this.wait(1200);
-                
-                if (!document.querySelector('[data-qa="vacancy-response-popup"]')) {
-                    console.log('Отклик успешно отправлен');
-                    return true;
-                }
-                
-                console.log('Отклик отправлен');
-                return true;
-            } catch (e) {
-                console.log('Ошибка отправки:', e);
-                return false;
+            if (submitButton.hasAttribute('disabled')) {
+                await this.wait(1000);
             }
+            
+            submitButton.click();
+            await this.wait(1200);
+            return true;
         }
         
         async closeModal() {
@@ -923,12 +925,22 @@
         
         getAvailableButtons() {
             const allButtons = Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]'));
-            return allButtons.filter(button => {
-                if (button.offsetParent === null || button.style.display === 'none') return false;
-                if (this.isFilteredOrganization(button)) return false;
-                if (this.isAlreadyRespondedVacancy(button)) return false;
-                return true;
-            });
+            const available = [];
+            
+            for (const button of allButtons) {
+                if (button.offsetParent === null || button.style.display === 'none') continue;
+                
+                if (this.isFilteredOrganization(button)) {
+                    console.log('⏭️ Вакансия пропущена (фильтр)');
+                    continue;
+                }
+                
+                if (this.isAlreadyRespondedVacancy(button)) continue;
+                
+                available.push(button);
+            }
+            
+            return available;
         }
         
         isAlreadyRespondedVacancy(button) {
@@ -963,21 +975,18 @@
             if (!this.isRunning) return false;
             
             this.resumeSelectedFlag = false;
-            this.stats.total++;
-            this.updateStatsDisplay();
             
-            const orgName = this.getOrganizationName(button);
+            const orgName = this.getOrganizationNameFromCard(button);
             this.updateStatus(`🎯 ${index + 1}/${total}: ${orgName || 'Обработка...'}`);
             
             const clicked = await this.safeClick(button);
             if (!clicked) {
                 this.stats.failed++;
                 this.updateStatsDisplay();
-                this.updateStatus(`❌ ${index + 1}/${total}: не удалось нажать`);
                 return false;
             }
             
-            const success = await this.processResponse();
+            const success = await this.processResponse(orgName);
             
             if (success) {
                 if (orgName && this.settings.autoRememberOrganizations) {
@@ -995,8 +1004,6 @@
                 await this.closeModal();
                 return true;
             } else {
-                this.stats.failed++;
-                this.updateStatsDisplay();
                 this.updateStatus(`⚠️ ${index + 1}/${total}: не удалось`);
                 await this.closeModal();
                 return false;
@@ -1030,7 +1037,7 @@
                             }
                         }
                         
-                        this.updateStatus(`🎉 Завершено! Успешно: ${this.stats.success}, Ошибок: ${this.stats.failed}`);
+                        this.updateStatus(`🎉 Завершено! Успешно: ${this.stats.success}, Ошибок: ${this.stats.failed}, Пропущено: ${this.stats.skipped}`);
                         break;
                     }
                     
@@ -1045,7 +1052,7 @@
                     await this.wait(800);
                 }
             } catch (error) {
-                console.error('Ошибка процесса:', error);
+                console.error('Ошибка:', error);
                 this.updateStatus('❌ Ошибка');
             } finally {
                 this.stopAutoProcess();
@@ -1061,26 +1068,29 @@
         async testProcess() {
             const buttons = this.getAvailableButtons();
             if (buttons.length === 0) {
-                this.updateStatus('❌ Нет вакансий для теста');
+                this.updateStatus('❌ Нет доступных вакансий для теста');
                 return;
             }
             
             this.updateStatus('🧪 Тестируем...');
             this.isRunning = true;
-            const success = await this.processSingleVacancy(buttons[0], 0, 1);
+            await this.processSingleVacancy(buttons[0], 0, 1);
             this.isRunning = false;
             this.updateControlButtons();
-            this.updateStatus(success ? '✅ Тест успешен!' : '⚠️ Тест не удался');
+            this.updateStatus('✅ Тест завершён');
         }
         
         testFilter() {
             const buttons = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-            let result = '🔍 Тест фильтра:\n\n';
+            let result = '🔍 ТЕСТ ФИЛЬТРА:\n\n';
+            let filtered = 0;
             buttons.forEach((btn, i) => {
-                const org = this.getOrganizationName(btn);
-                const filtered = this.isFilteredOrganization(btn);
-                result += `${i + 1}. ${org || '???'} - ${filtered ? '🚫 ФИЛЬТР' : '✅ НОРМА'}\n`;
+                const org = this.getOrganizationNameFromCard(btn);
+                const isFiltered = this.isFilteredOrganization(btn);
+                if (isFiltered) filtered++;
+                result += `${i + 1}. ${org || '???'} - ${isFiltered ? '🚫 ЗАБЛОКИРОВАНА' : '✅ РАЗРЕШЕНА'}\n`;
             });
+            result += `\n📊 ИТОГО: ${filtered} из ${buttons.length} вакансий заблокировано фильтром`;
             this.updateStatus(result);
             console.log(result);
         }
@@ -1088,7 +1098,7 @@
         analyzePage() {
             const all = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]').length;
             const available = this.getAvailableButtons().length;
-            this.updateStatus(`📊 Анализ:\nВсего: ${all}\nДоступно: ${available}\nУспешно: ${this.stats.success}\nОшибок: ${this.stats.failed}`);
+            this.updateStatus(`📊 АНАЛИЗ:\nВсего: ${all}\nДоступно: ${available}\nУспешно: ${this.stats.success}\nОшибок: ${this.stats.failed}\nПропущено: ${this.stats.skipped}`);
         }
         
         clearHistory() {
