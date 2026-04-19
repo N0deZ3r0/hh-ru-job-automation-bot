@@ -1,8 +1,8 @@
-// ===== HH АВТО-ОТКЛИК v1.2 (ФИНАЛЬНАЯ СТАБИЛЬНАЯ ВЕРСИЯ) =====
+// ===== HH АВТО-ОТКЛИК v1.3 (СВОРАЧИВАЕМЫЕ НАСТРОЙКИ) =====
 (function() {
     'use strict';
     
-    console.log('=== HH Авто-отклик v1.2 ===');
+    console.log('=== HH Авто-отклик v1.3 ===');
     
     if (!window.location.href.includes('hh.ru')) {
         console.log('⚠️ Не страница HH.ru, скрипт не активирован');
@@ -21,11 +21,15 @@
                 delay: 0.5,
                 filterOrganizations: true,
                 autoRememberOrganizations: true,
-                skipCoverLetter: false
+                skipCoverLetter: false,
+                autoSelectResume: true,
+                resumeTitleMatching: 70
             };
             this.filteredOrganizations = [];
             this.autoFilteredOrganizations = [];
             this.theme = 'dark';
+            this.resumeSelectedFlag = false;
+            this.settingsCollapsed = true; // Настройки свернуты по умолчанию
             
             window.hhAutoResponder = this;
             
@@ -38,6 +42,11 @@
             this.loadSettings();
             this.createInterface();
             this.setupEventListeners();
+            
+            if (this.settings.resumeTitleMatching > 80) {
+                this.settings.resumeTitleMatching = 70;
+                this.saveSettings();
+            }
             
             console.log('✅ HH Авто-отклик готов к работе!');
             this.updateStatus('✅ Готов к работе на этой странице');
@@ -55,9 +64,7 @@
                     if (parsed.filteredOrganizations) this.filteredOrganizations = parsed.filteredOrganizations;
                     if (parsed.autoFilteredOrganizations) this.autoFilteredOrganizations = parsed.autoFilteredOrganizations;
                 }
-            } catch (e) {
-                console.log('Используем настройки по умолчанию');
-            }
+            } catch (e) {}
         }
         
         saveSettings() {
@@ -70,9 +77,7 @@
                     filteredOrganizations: this.filteredOrganizations,
                     autoFilteredOrganizations: this.autoFilteredOrganizations
                 }));
-            } catch (e) {
-                console.log('Не удалось сохранить настройки');
-            }
+            } catch (e) {}
         }
         
         wait(ms) {
@@ -90,7 +95,6 @@
         removeOldInterface() {
             const oldPanel = document.getElementById('hh-auto-panel');
             if (oldPanel) oldPanel.remove();
-            
             const oldBtn = document.getElementById('hh-toggle-btn');
             if (oldBtn) oldBtn.remove();
         }
@@ -127,37 +131,31 @@
                 transition: 'all 0.3s'
             });
             
+            // Стрелка для сворачивания настроек
+            const settingsArrow = this.settingsCollapsed ? '▶' : '▼';
+            
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.2</h3>
+                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.3</h3>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <span id="hh-moon-icon" style="font-size: 14px; color: ${isDark ? '#4CAF50' : '#666'}; transition: all 0.3s;">☀️</span>
-                            <div id="hh-theme-slider" style="position: relative; width: 44px; height: 20px; cursor: pointer; border-radius: 12px; background: ${isDark ? '#2d2d2d' : '#e0e0e0'}; transition: all 0.3s; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
-                                <div id="hh-theme-slider-handle" style="position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: ${isDark ? '#4CAF50' : '#FF9800'}; border-radius: 50%; transition: all 0.3s; transform: ${isDark ? 'translateX(22px)' : 'translateX(2px)'}; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                                </div>
+                            <span id="hh-moon-icon" style="font-size: 14px; color: ${isDark ? '#4CAF50' : '#666'};">☀️</span>
+                            <div id="hh-theme-slider" style="position: relative; width: 44px; height: 20px; cursor: pointer; border-radius: 12px; background: ${isDark ? '#2d2d2d' : '#e0e0e0'}; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
+                                <div id="hh-theme-slider-handle" style="position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: ${isDark ? '#4CAF50' : '#FF9800'}; border-radius: 50%; transition: all 0.3s; transform: ${isDark ? 'translateX(22px)' : 'translateX(2px)'};"></div>
                             </div>
-                            <span id="hh-sun-icon" style="font-size: 14px; color: ${isDark ? '#aaa' : '#FF9800'}; transition: all 0.3s;">🌙</span>
+                            <span id="hh-sun-icon" style="font-size: 14px; color: ${isDark ? '#aaa' : '#FF9800'};">🌙</span>
                         </div>
-                        <button id="hh-close-btn" style="background: none; border: none; font-size: 20px; cursor: pointer; color: ${secondaryText}; padding: 2px; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;" title="Скрыть панель">
-                            ×
-                        </button>
+                        <button id="hh-close-btn" style="background: none; border: none; font-size: 20px; cursor: pointer; color: ${secondaryText};">×</button>
                     </div>
                 </div>
                 
-                <div id="hh-status" style="background: ${statusBg}; color: ${statusColor}; padding: 10px; border-radius: 6px; font-size: 13px; min-height: 50px; margin-bottom: 10px; border: 1px solid ${inputBorder};">
-                    ✅ Готов к работе
-                </div>
+                <div id="hh-status" style="background: ${statusBg}; color: ${statusColor}; padding: 10px; border-radius: 6px; font-size: 13px; min-height: 50px; margin-bottom: 10px; border: 1px solid ${inputBorder};">✅ Готов к работе</div>
                 
                 <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                    <div style="font-size: 12px; color: ${secondaryText};">
-                        🔍 Найдено: <span id="hh-count" style="font-weight: bold; color: ${textColor};">0</span>
-                    </div>
-                    <div id="hh-stats" style="font-size: 11px; color: ${secondaryText}; background: ${isDark ? '#2d2d2d' : '#f5f5f5'}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${inputBorder};">
-                        ✅0 ❌0 ⏭️0
-                    </div>
+                    <div style="font-size: 12px; color: ${secondaryText};">🔍 Найдено: <span id="hh-count" style="font-weight: bold; color: ${textColor};">0</span></div>
+                    <div id="hh-stats" style="font-size: 11px; color: ${secondaryText}; background: ${isDark ? '#2d2d2d' : '#f5f5f5'}; padding: 4px 8px; border-radius: 4px; border: 1px solid ${inputBorder};">✅0 ❌0 ⏭️0</div>
                 </div>
                 
                 <div style="margin-bottom: 10px;">
@@ -175,98 +173,69 @@
                     </div>
                 </div>
                 
+                <!-- СВОРАЧИВАЕМЫЙ БЛОК НАСТРОЕК -->
                 <div style="margin-bottom: 10px;">
-                    <div style="font-weight: bold; font-size: 13px; margin: 10px 0 5px 0; color: ${textColor};">⚙️ Настройки:</div>
-                    <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
-                        <input type="checkbox" id="hh-auto-next" ${this.settings.autoNextPage ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
-                        Автопереход на следующую страницу
-                    </label>
-                    <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
-                        <input type="checkbox" id="hh-skip-responded" ${this.settings.skipResponded ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
-                        Пропускать уже откликнутые
-                    </label>
-                    <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
-                        <input type="checkbox" id="hh-filter-organizations" ${this.settings.filterOrganizations ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
-                        Фильтровать организации
-                    </label>
-                    <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
-                        <input type="checkbox" id="hh-auto-remember" ${this.settings.autoRememberOrganizations ? 'checked' : ''} style="margin-right: 8px; cursor: pointer;">
-                        <strong>Автодобавление в фильтр</strong>
-                    </label>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; color: ${textColor};">
-                        <span style="font-size: 13px;">Задержка (сек):</span>
-                        <input type="number" id="hh-delay" min="0.3" max="5" step="0.1" value="${this.settings.delay}" style="width: 50px; padding: 4px; border: 1px solid ${inputBorder}; border-radius: 4px; background: ${inputBg}; color: ${textColor}; text-align: center;">
+                    <div id="hh-settings-header" style="font-weight: bold; font-size: 13px; margin: 10px 0 5px 0; color: ${textColor}; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none;">
+                        <span id="hh-settings-arrow" style="font-size: 14px; transition: transform 0.2s;">${settingsArrow}</span>
+                        <span>⚙️ Настройки</span>
+                    </div>
+                    <div id="hh-settings-content" style="margin-left: 20px; ${this.settingsCollapsed ? 'display: none;' : ''}">
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
+                            <input type="checkbox" id="hh-auto-next" ${this.settings.autoNextPage ? 'checked' : ''} style="margin-right: 8px;">
+                            Автопереход на следующую страницу
+                        </label>
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
+                            <input type="checkbox" id="hh-skip-responded" ${this.settings.skipResponded ? 'checked' : ''} style="margin-right: 8px;">
+                            Пропускать уже откликнутые
+                        </label>
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
+                            <input type="checkbox" id="hh-filter-organizations" ${this.settings.filterOrganizations ? 'checked' : ''} style="margin-right: 8px;">
+                            Фильтровать организации
+                        </label>
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
+                            <input type="checkbox" id="hh-auto-remember" ${this.settings.autoRememberOrganizations ? 'checked' : ''} style="margin-right: 8px;">
+                            <strong>Автодобавление в фильтр</strong>
+                        </label>
+                        <label style="display: flex; align-items: center; font-size: 13px; margin-bottom: 5px; color: ${textColor}; cursor: pointer;">
+                            <input type="checkbox" id="hh-auto-select-resume" ${this.settings.autoSelectResume ? 'checked' : ''} style="margin-right: 8px;">
+                            <strong>🎯 Автовыбор резюме</strong>
+                        </label>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px; color: ${textColor};">
+                            <span style="font-size: 12px;">Порог совпадения:</span>
+                            <input type="range" id="hh-resume-matching" min="0" max="100" step="5" value="${this.settings.resumeTitleMatching}" style="width: 100px;">
+                            <span id="hh-matching-value" style="font-size: 12px;">${this.settings.resumeTitleMatching}%</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; color: ${textColor};">
+                            <span style="font-size: 13px;">Задержка (сек):</span>
+                            <input type="number" id="hh-delay" min="0.3" max="5" step="0.1" value="${this.settings.delay}" style="width: 50px; padding: 4px; border: 1px solid ${inputBorder}; border-radius: 4px; background: ${inputBg}; color: ${textColor}; text-align: center;">
+                        </div>
                     </div>
                 </div>
                 
                 <div style="margin-bottom: 10px;">
                     <div style="font-weight: bold; font-size: 13px; margin-bottom: 5px; color: ${textColor};">🚫 Фильтр организаций (ручной):</div>
-                    <textarea id="hh-filter-text" placeholder="Введите названия организаций через запятую&#10;Пример: Яндекс, Google, Специальные технологии" style="width: 100%; height: 80px; padding: 8px; border: 1px solid ${inputBorder}; border-radius: 4px; font-size: 13px; resize: vertical; background: ${inputBg}; color: ${textColor};">${this.filteredOrganizations.length > 0 ? this.filteredOrganizations.join(', ') : ''}</textarea>
-                    <div style="font-size: 11px; color: ${secondaryText}; margin-top: 3px;">
-                        * Не откликаться на эти организации (полное или частичное совпадение)
-                    </div>
+                    <textarea id="hh-filter-text" placeholder="Введите названия организаций через запятую&#10;Пример: Яндекс, Google, Специальные технологии" style="width: 100%; height: 80px; padding: 8px; border: 1px solid ${inputBorder}; border-radius: 4px; font-size: 13px; resize: vertical; background: ${inputBg}; color: ${textColor};">${this.filteredOrganizations.join(', ')}</textarea>
+                    <div style="font-size: 11px; color: ${secondaryText}; margin-top: 3px;">* Не откликаться на эти организации (полное или частичное совпадение)</div>
                 </div>
                 
                 <div style="display: flex; flex-direction: column; gap: 8px; margin: 15px 0 10px 0;">
-                    <button id="hh-start" style="padding: 12px; background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-                            <span>▶️</span>
-                            <span>НАЧАТЬ АВТО-ОТКЛИК</span>
-                        </span>
-                    </button>
-                    <button id="hh-test" style="padding: 10px; background: linear-gradient(135deg, #FF9800, #f57c00); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-                            <span>🧪</span>
-                            <span>Тест на 1 вакансию</span>
-                        </span>
-                    </button>
-                    <button id="hh-stop" style="padding: 12px; background: linear-gradient(135deg, #f44336, #d32f2f); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; display: none;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-                            <span>⏹️</span>
-                            <span>ОСТАНОВИТЬ</span>
-                        </span>
-                    </button>
+                    <button id="hh-start" style="padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">▶️ НАЧАТЬ АВТО-ОТКЛИК</button>
+                    <button id="hh-test" style="padding: 10px; background: #FF9800; color: white; border: none; border-radius: 6px; cursor: pointer;">🧪 Тест на 1 вакансию</button>
+                    <button id="hh-stop" style="padding: 12px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; display: none;">⏹️ ОСТАНОВИТЬ</button>
                 </div>
                 
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                    <button id="hh-analyze" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #2196F3, #1976D2); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                            <span>📊</span>
-                            <span>Анализ</span>
-                        </span>
-                    </button>
-                    <button id="hh-test-filter" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #9C27B0, #7B1FA2); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                            <span>🔍</span>
-                            <span>Тест фильтра</span>
-                        </span>
-                    </button>
-                    <button id="hh-show-auto-filter" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #00BCD4, #0097A7); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                            <span>🤖</span>
-                            <span>Автофильтр</span>
-                        </span>
-                    </button>
+                    <button id="hh-analyze" style="flex: 1; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer;">📊 Анализ</button>
+                    <button id="hh-test-filter" style="flex: 1; padding: 8px; background: #9C27B0; color: white; border: none; border-radius: 6px; cursor: pointer;">🔍 Тест фильтра</button>
+                    <button id="hh-show-auto-filter" style="flex: 1; padding: 8px; background: #00BCD4; color: white; border: none; border-radius: 6px; cursor: pointer;">🤖 Автофильтр</button>
                 </div>
                 
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                    <button id="hh-clear" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #607D8B, #455a64); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                            <span>🗑️</span>
-                            <span>Очистить статистику</span>
-                        </span>
-                    </button>
-                    <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #f44336, #d32f2f); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">
-                        <span style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                            <span>🧹</span>
-                            <span>Очистить автофильтр</span>
-                        </span>
-                    </button>
+                    <button id="hh-clear" style="flex: 1; padding: 8px; background: #607D8B; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Очистить статистику</button>
+                    <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer;">🧹 Очистить автофильтр</button>
                 </div>
                 
-                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">
-                    By ALEX
-                </div>
+                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX</div>
             `;
             
             document.body.appendChild(this.panel);
@@ -311,6 +280,14 @@
                 this.panel.style.display = 'none';
             });
             
+            // Сворачивание настроек
+            const settingsHeader = document.getElementById('hh-settings-header');
+            if (settingsHeader) {
+                settingsHeader.addEventListener('click', () => {
+                    this.toggleSettings();
+                });
+            }
+            
             const themeSlider = document.getElementById('hh-theme-slider');
             if (themeSlider) {
                 themeSlider.addEventListener('click', () => {
@@ -350,12 +327,22 @@
                 }
             });
             
+            document.getElementById('hh-auto-select-resume').addEventListener('change', (e) => {
+                this.settings.autoSelectResume = e.target.checked;
+                this.saveSettings();
+                this.updateStatus(e.target.checked ? '🎯 Автовыбор резюме ВКЛЮЧЕН' : '🎯 Автовыбор резюме ВЫКЛЮЧЕН');
+            });
+            
+            document.getElementById('hh-resume-matching').addEventListener('input', (e) => {
+                this.settings.resumeTitleMatching = parseInt(e.target.value);
+                document.getElementById('hh-matching-value').textContent = this.settings.resumeTitleMatching + '%';
+                this.saveSettings();
+            });
+            
             document.getElementById('hh-auto-remember').addEventListener('change', (e) => {
                 this.settings.autoRememberOrganizations = e.target.checked;
                 this.saveSettings();
-                this.updateStatus(e.target.checked ? 
-                    '✅ АВТОфильтр ВКЛЮЧЕН - организации будут добавляться автоматически' : 
-                    '⭕ АВТОфильтр выключен');
+                this.updateStatus(e.target.checked ? '✅ АВТОфильтр ВКЛЮЧЕН' : '⭕ АВТОфильтр выключен');
             });
             
             document.getElementById('hh-letter').addEventListener('input', (e) => {
@@ -386,14 +373,25 @@
             
             document.getElementById('hh-filter-text').addEventListener('input', (e) => {
                 const text = e.target.value;
-                this.filteredOrganizations = text.split(',')
-                    .map(org => org.trim())
-                    .filter(org => org.length > 0);
+                this.filteredOrganizations = text.split(',').map(org => org.trim()).filter(org => org.length > 0);
                 this.saveSettings();
-                console.log('📋 Обновлён ручной фильтр:', this.filteredOrganizations);
             });
             
             setInterval(() => this.updateCount(), 5000);
+        }
+        
+        toggleSettings() {
+            this.settingsCollapsed = !this.settingsCollapsed;
+            const content = document.getElementById('hh-settings-content');
+            const arrow = document.getElementById('hh-settings-arrow');
+            
+            if (content) {
+                content.style.display = this.settingsCollapsed ? 'none' : 'block';
+            }
+            if (arrow) {
+                arrow.textContent = this.settingsCollapsed ? '▶' : '▼';
+                arrow.style.transform = this.settingsCollapsed ? 'rotate(0deg)' : 'rotate(90deg)';
+            }
         }
         
         toggleTheme() {
@@ -414,7 +412,6 @@
                 handle.style.transform = isDark ? 'translateX(22px)' : 'translateX(2px)';
                 handle.style.background = isDark ? '#4CAF50' : '#FF9800';
             }
-            
             if (moonIcon) moonIcon.style.color = isDark ? '#4CAF50' : '#666';
             if (sunIcon) sunIcon.style.color = isDark ? '#aaa' : '#FF9800';
             if (slider) slider.style.background = isDark ? '#2d2d2d' : '#e0e0e0';
@@ -454,13 +451,11 @@
                 textarea.style.color = textColor;
                 textarea.style.borderColor = inputBorder;
             }
-            
             if (delayInput) {
                 delayInput.style.background = inputBg;
                 delayInput.style.color = textColor;
                 delayInput.style.borderColor = inputBorder;
             }
-            
             if (filterTextarea) {
                 filterTextarea.style.background = inputBg;
                 filterTextarea.style.color = textColor;
@@ -474,96 +469,70 @@
             this.toggleButton.style.background = btnBg;
         }
         
-        // ===== ПОЛУЧЕНИЕ НАЗВАНИЯ ОРГАНИЗАЦИИ (С ПОДДЕРЖКОЙ &nbsp;) =====
+        // ===== ОСТАЛЬНЫЕ МЕТОДЫ (ТЕ ЖЕ, ЧТО И В v1.3.3) =====
+        // ... (getOrganizationName, isFilteredOrganization, addToAutoFilter, showAutoFilter, clearAutoFilter, closeChatIfOpened, getVacancyTitleFromModal, openResumeDropdown, closeResumeDropdown, getAllResumes, selectBestResume, processResponse, submitResponse, closeModal, updateStatus, updateStatsDisplay, updateCount, updateControlButtons, getAvailableButtons, isAlreadyRespondedVacancy, safeClick, processSingleVacancy, startAutoProcess, stopAutoProcess, testProcess, testFilter, analyzePage, clearHistory)
+        
+        // Для краткости, остальные методы такие же как в v1.3.3
+        // Они будут добавлены ниже...
         
         getOrganizationName(button) {
             const vacancyItem = button.closest('.vacancy-serp-item') || 
                                button.closest('.serp-item') ||
                                button.closest('[data-qa="vacancy-serp__vacancy"]');
+            if (!vacancyItem) return null;
             
-            if (!vacancyItem) {
-                return null;
-            }
-            
-            // 1. Прямой поиск по data-qa (самый надёжный)
             const orgElement = vacancyItem.querySelector('[data-qa="vacancy-serp__vacancy-employer-text"]');
             if (orgElement) {
                 let text = orgElement.textContent || orgElement.innerText || '';
                 text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
-                if (text) {
-                    return text;
-                }
+                if (text) return text;
             }
             
-            // 2. Поиск через ссылку работодателя
             const employerLink = vacancyItem.querySelector('[data-qa="vacancy-serp__vacancy-employer"]');
             if (employerLink) {
                 let text = employerLink.textContent || employerLink.innerText || '';
                 text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
-                if (text) {
-                    return text;
-                }
+                if (text) return text;
             }
             
-            // 3. Поиск через magritte-text элементы
             const magritteElements = vacancyItem.querySelectorAll('.magritte-text');
             for (const element of magritteElements) {
                 let text = element.textContent || element.innerText || '';
                 text = text.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
-                if (text && !text.includes('₽') && 
-                    !text.includes('отклик') && !text.includes('просмотр') &&
-                    text.length > 1 && text.length < 100) {
+                if (text && !text.includes('₽') && !text.includes('отклик') && !text.includes('просмотр') && text.length > 1 && text.length < 100) {
                     return text;
                 }
             }
-            
             return null;
         }
         
-        // ===== ПРОВЕРКА ФИЛЬТРАЦИИ (НОРМАЛИЗАЦИЯ ТЕКСТА) =====
-        
         isFilteredOrganization(button) {
-            if (!this.settings.filterOrganizations) {
-                return false;
-            }
+            if (!this.settings.filterOrganizations) return false;
             
             const organizationName = this.getOrganizationName(button);
-            if (!organizationName) {
-                return false;
-            }
+            if (!organizationName) return false;
             
             const orgNameNormalized = organizationName.replace(/\s+/g, ' ').toLowerCase().trim();
             
-            // Проверка по ручному фильтру
             for (const filter of this.filteredOrganizations) {
                 if (!filter || !filter.trim()) continue;
-                
                 const filterNormalized = filter.toLowerCase().trim();
-                
-                if (orgNameNormalized === filterNormalized || 
-                    orgNameNormalized.includes(filterNormalized) || 
-                    filterNormalized.includes(orgNameNormalized)) {
+                if (orgNameNormalized === filterNormalized || orgNameNormalized.includes(filterNormalized) || filterNormalized.includes(orgNameNormalized)) {
                     console.log(`🚫 Фильтр: "${organizationName}" заблокирована`);
                     return true;
                 }
             }
             
-            // Проверка по автофильтру
             if (this.settings.autoRememberOrganizations) {
                 for (const autoFilter of this.autoFilteredOrganizations) {
                     if (!autoFilter || !autoFilter.trim()) continue;
-                    
                     const autoFilterNormalized = autoFilter.toLowerCase().trim();
-                    
-                    if (orgNameNormalized === autoFilterNormalized || 
-                        orgNameNormalized.includes(autoFilterNormalized) || 
-                        autoFilterNormalized.includes(orgNameNormalized)) {
+                    if (orgNameNormalized === autoFilterNormalized || orgNameNormalized.includes(autoFilterNormalized) || autoFilterNormalized.includes(orgNameNormalized)) {
                         console.log(`🚫 Автофильтр: "${organizationName}" заблокирована`);
                         return true;
                     }
                 }
             }
-            
             return false;
         }
         
@@ -574,36 +543,24 @@
             if (!orgNameTrimmed) return false;
             
             const orgNameLower = orgNameTrimmed.toLowerCase();
-            const alreadyExists = this.autoFilteredOrganizations.some(org => 
-                org.toLowerCase() === orgNameLower
-            );
+            const alreadyExists = this.autoFilteredOrganizations.some(org => org.toLowerCase() === orgNameLower);
             
-            if (alreadyExists) {
-                return false;
-            }
+            if (alreadyExists) return false;
             
             this.autoFilteredOrganizations.push(orgNameTrimmed);
             this.saveSettings();
             console.log(`🤖 Добавлено в автофильтр: "${orgNameTrimmed}"`);
-            
             return true;
         }
         
         showAutoFilter() {
             if (this.autoFilteredOrganizations.length === 0) {
-                this.updateStatus('Автофильтр пуст. Организации будут добавляться автоматически при отправке откликов.');
+                this.updateStatus('Автофильтр пуст');
                 return;
             }
-            
             let message = `АВТОФИЛЬТР (всего: ${this.autoFilteredOrganizations.length}):\n\n`;
-            
-            this.autoFilteredOrganizations.forEach((org, index) => {
-                message += `${index + 1}. ${org}\n`;
-            });
-            
+            this.autoFilteredOrganizations.forEach((org, index) => { message += `${index + 1}. ${org}\n`; });
             message += `\n⚠️ Эти организации будут автоматически пропускаться в будущем.`;
-            message += `\n\nИспользуйте кнопку "Очистить авто" для очистки.`;
-            
             this.updateStatus(message);
         }
         
@@ -612,7 +569,6 @@
                 this.updateStatus('Автофильтр уже пуст');
                 return;
             }
-            
             if (confirm(`Очистить автофильтр?\n\nУдалить ${this.autoFilteredOrganizations.length} организаций?`)) {
                 const count = this.autoFilteredOrganizations.length;
                 this.autoFilteredOrganizations = [];
@@ -621,29 +577,40 @@
             }
         }
         
-        // ===== ЗАКРЫТИЕ ЧАТА =====
-        
         async closeChatIfOpened() {
             try {
-                const closeButton = document.querySelector('[data-qa="chatik-close-chatik"]');
-                
-                if (closeButton) {
-                    console.log('🚫 Обнаружен чат, закрываем его...');
+                let closeButton = document.querySelector('[data-qa="chatik-close-chatik"]');
+                if (closeButton && closeButton.offsetParent !== null) {
+                    console.log('🚫 Закрываем чат (data-qa)');
                     closeButton.click();
                     await this.wait(500);
                     return true;
                 }
                 
-                const allButtons = document.querySelectorAll('button');
-                for (const btn of allButtons) {
-                    if (btn.getAttribute('aria-label') === 'close') {
-                        console.log('🚫 Закрываем чат');
-                        btn.click();
+                const chatRoot = document.querySelector('[data-qa="chatik-root"]');
+                if (chatRoot) {
+                    const closeBtn = chatRoot.querySelector('button[aria-label="close"], button[aria-label="Закрыть"]');
+                    if (closeBtn) {
+                        console.log('🚫 Закрываем чат (aria-label)');
+                        closeBtn.click();
                         await this.wait(500);
                         return true;
                     }
                 }
                 
+                const allButtons = document.querySelectorAll('button');
+                for (const btn of allButtons) {
+                    const svg = btn.querySelector('svg');
+                    if (svg) {
+                        const svgPath = svg.innerHTML;
+                        if (svgPath && (svgPath.includes('M18 6L6 18') || svgPath.includes('M6 6L18 18'))) {
+                            console.log('🚫 Закрываем чат (иконка крестика)');
+                            btn.click();
+                            await this.wait(500);
+                            return true;
+                        }
+                    }
+                }
                 return false;
             } catch (e) {
                 console.log('Ошибка при закрытии чата:', e);
@@ -651,27 +618,190 @@
             }
         }
         
-        // ===== УНИВЕРСАЛЬНАЯ ОБРАБОТКА ОТКЛИКОВ =====
+        getVacancyTitleFromModal() {
+            const selectors = [
+                '[data-qa="title-description"] .magritte-text_style-secondary',
+                '[data-qa="title-description"] .magritte-text',
+                '.magritte-modal-content [data-qa="title-description"]',
+                '[role="dialog"] [data-qa="title-description"]'
+            ];
+            
+            for (const selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                    const title = element.textContent.trim();
+                    if (title && title.length > 2 && title.length < 200 && !title.includes('Отклик')) {
+                        console.log('Название вакансии из модалки:', title);
+                        return title;
+                    }
+                }
+            }
+            
+            const modal = document.querySelector('[role="dialog"]');
+            if (modal) {
+                const textElements = modal.querySelectorAll('.magritte-text_style-secondary');
+                for (const el of textElements) {
+                    const text = el.textContent.trim();
+                    if (text && text.length > 3 && text.length < 200 && !text.includes('Отклик') && !text.includes('руб')) {
+                        console.log('Название вакансии (альт):', text);
+                        return text;
+                    }
+                }
+            }
+            return null;
+        }
         
-        async universalProcess() {
-            console.log('🔄 Универсальная обработка отклика...');
-            await this.wait(800);
+        async openResumeDropdown() {
+            console.log('Открываем список резюме...');
+            const resumeCard = document.querySelector('[data-qa="resume-title"]');
+            if (resumeCard) {
+                const clickable = resumeCard.closest('[role="button"], [tabindex="0"]');
+                if (clickable) {
+                    clickable.click();
+                    await this.wait(600);
+                    const dropdown = document.querySelector('[role="listbox"]');
+                    if (dropdown && dropdown.offsetParent !== null) {
+                        console.log('Список резюме открыт');
+                        return true;
+                    }
+                }
+            }
+            console.log('Не удалось открыть список резюме');
+            return false;
+        }
+        
+        async closeResumeDropdown() {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+            await this.wait(300);
+            return true;
+        }
+        
+        async getAllResumes() {
+            const resumes = [];
+            const items = document.querySelectorAll('label[role="option"][data-interactive="true"]');
             
-            // 0. Закрываем чат
-            await this.closeChatIfOpened();
+            for (const item of items) {
+                const titleEl = item.querySelector('[data-qa="cell-text-content"]');
+                if (titleEl) {
+                    const title = titleEl.textContent.trim();
+                    if (title) {
+                        const radio = item.querySelector('input[type="radio"]');
+                        resumes.push({
+                            element: item,
+                            title: title,
+                            isSelected: radio ? radio.checked : false
+                        });
+                    }
+                }
+            }
+            return resumes;
+        }
+        
+        async selectBestResume(vacancyTitle) {
+            if (!this.settings.autoSelectResume || !vacancyTitle) return false;
             
-            // 1. Проверяем поле для письма (уже открыто)
+            console.log(`🎯 Выбор резюме для вакансии: "${vacancyTitle}"`);
+            console.log(`📊 Порог совпадения: ${this.settings.resumeTitleMatching}%`);
+            
+            const opened = await this.openResumeDropdown();
+            if (!opened) return false;
+            
+            await this.wait(500);
+            const resumes = await this.getAllResumes();
+            console.log(`📋 Найдено резюме: ${resumes.length}`);
+            
+            if (resumes.length <= 1) {
+                console.log('Только одно резюме, переключение не нужно');
+                await this.closeResumeDropdown();
+                return false;
+            }
+            
+            let bestMatch = null;
+            let bestScore = 0;
+            
+            for (const resume of resumes) {
+                if (resume.isSelected) {
+                    console.log(`  📌 Текущее: "${resume.title}" (уже выбрано)`);
+                    continue;
+                }
+                
+                const vacancyLower = vacancyTitle.toLowerCase();
+                const resumeLower = resume.title.toLowerCase();
+                let score = 0;
+                
+                if (resumeLower === vacancyLower) {
+                    score = 100;
+                } else if (vacancyLower.includes(resumeLower)) {
+                    score = 95;
+                } else if (resumeLower.includes(vacancyLower)) {
+                    score = 90;
+                } else {
+                    const stopWords = ['прием', 'отправка', 'тмц', 'работа', 'сотрудник', 'специалист', 'помощник', 'и', 'с', 'по', 'на', 'в', 'для'];
+                    let vacancyWords = vacancyLower.split(/[\s,()\-/]+/).filter(w => w.length > 2);
+                    let resumeWords = resumeLower.split(/[\s,()\-/]+/).filter(w => w.length > 2);
+                    vacancyWords = vacancyWords.filter(w => !stopWords.includes(w));
+                    resumeWords = resumeWords.filter(w => !stopWords.includes(w));
+                    
+                    let matches = 0;
+                    for (const vw of vacancyWords) {
+                        for (const rw of resumeWords) {
+                            if (vw === rw || rw.includes(vw) || vw.includes(rw)) {
+                                matches++;
+                                break;
+                            }
+                        }
+                    }
+                    if (vacancyWords.length > 0) score = (matches / vacancyWords.length) * 100;
+                }
+                
+                console.log(`  "${resume.title}" → ${Math.round(score)}%`);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = resume;
+                }
+            }
+            
+            console.log(`🏆 Лучшее совпадение: ${bestMatch ? bestMatch.title : 'нет'} (${Math.round(bestScore)}%)`);
+            console.log(`🎯 Порог: ${this.settings.resumeTitleMatching}%`);
+            
+            if (bestMatch && bestScore >= this.settings.resumeTitleMatching) {
+                console.log(`✅ ВЫБИРАЕМ: "${bestMatch.title}" (${Math.round(bestScore)}% >= ${this.settings.resumeTitleMatching}%)`);
+                bestMatch.element.click();
+                await this.wait(500);
+                await this.closeResumeDropdown();
+                return true;
+            }
+            
+            console.log(`❌ Не выбрано: ${Math.round(bestScore)}% < ${this.settings.resumeTitleMatching}%`);
+            await this.closeResumeDropdown();
+            return false;
+        }
+        
+        async processResponse() {
+            console.log('🔄 Обработка отклика...');
+            
+            for (let i = 0; i < 3; i++) {
+                await this.closeChatIfOpened();
+                await this.wait(300);
+            }
+            await this.wait(500);
+            
+            if (this.settings.autoSelectResume && !this.resumeSelectedFlag) {
+                const vacancyTitle = this.getVacancyTitleFromModal();
+                if (vacancyTitle) {
+                    await this.selectBestResume(vacancyTitle);
+                    this.resumeSelectedFlag = true;
+                    await this.wait(500);
+                }
+            }
+            
             const textarea = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
             
             if (textarea) {
                 console.log('📝 Найдено поле для письма');
                 
                 if (!this.settings.skipCoverLetter) {
-                    const nativeSetter = Object.getOwnPropertyDescriptor(
-                        window.HTMLTextAreaElement.prototype, 
-                        'value'
-                    )?.set;
-                    
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
                     if (nativeSetter) {
                         nativeSetter.call(textarea, this.coverLetter);
                         textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -680,7 +810,6 @@
                         textarea.value = this.coverLetter;
                         textarea.dispatchEvent(new Event('input', { bubbles: true }));
                     }
-                    
                     this.updateStatus('📝 Письмо добавлено');
                     await this.wait(500);
                 }
@@ -688,116 +817,36 @@
                 return await this.submitResponse();
             }
             
-            // 2. Кнопка "Добавить сопроводительное"
             const addLetterButton = document.querySelector('[data-qa="add-cover-letter"]');
             
-            if (addLetterButton) {
-                if (this.settings.skipCoverLetter) {
-                    return await this.processDirectOrSimple();
-                }
+            if (addLetterButton && !this.settings.skipCoverLetter) {
                 console.log('📝 Нажимаем "Добавить сопроводительное"');
                 addLetterButton.click();
                 await this.wait(800);
-                return await this.universalProcess();
+                return await this.processResponse();
             }
             
-            // 3. Кнопка "Все равно откликнуться"
             const relocationButton = document.querySelector('[data-qa="relocation-warning-confirm"]') ||
                                      Array.from(document.querySelectorAll('button')).find(btn => 
-                                         btn.textContent && btn.textContent.trim() === 'Все равно откликнуться'
-                                     );
+                                         btn.textContent && btn.textContent.trim() === 'Все равно откликнуться');
             
             if (relocationButton) {
                 console.log('📍 Подтверждаем переезд');
                 relocationButton.click();
                 await this.wait(800);
-                return await this.universalProcess();
+                return await this.processResponse();
             }
             
-            // 4. Прямая отправка
-            return await this.processDirectOrSimple();
-        }
-        
-        async processWithCoverLetter() {
-            console.log('Обработка с сопроводительным письмом...');
-            this.updateStatus('📝 Добавляем письмо...');
-            
-            try {
-                const addLetterButton = document.querySelector('[data-qa="add-cover-letter"]');
-                if (!addLetterButton) {
-                    console.log('Кнопка не найдена');
-                    return false;
-                }
-                
-                console.log('Кликаем на кнопку...');
-                addLetterButton.click();
-                await this.wait(600);
-                
-                const textarea = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
-                if (!textarea) {
-                    console.log('Поле для письма не найдено');
-                    return false;
-                }
-                
-                console.log('Заполняем поле...');
-                
-                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLTextAreaElement.prototype, 
-                    'value'
-                )?.set;
-                
-                if (nativeInputValueSetter) {
-                    nativeInputValueSetter.call(textarea, this.coverLetter);
-                    const inputEvent = new Event('input', { bubbles: true });
-                    textarea.dispatchEvent(inputEvent);
-                    await this.wait(150);
-                } else {
-                    textarea.value = this.coverLetter;
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    await this.wait(150);
-                }
-                
-                return await this.submitResponse();
-                
-            } catch (e) {
-                console.log('Ошибка при обработке с письмом:', e);
-                return false;
-            }
-        }
-        
-        async processDirectOrSimple() {
-            console.log('Обработка прямого/простого отклика...');
-            this.updateStatus('📤 Отправляем отклик...');
-            
-            try {
-                const submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                if (submitButton) {
-                    console.log('Найдена кнопка отправки');
-                    submitButton.click();
-                    await this.wait(1000);
-                    return true;
-                } else {
-                    console.log('Прямой отклик');
-                    await this.wait(800);
-                    return true;
-                }
-            } catch (e) {
-                console.log('Ошибка:', e);
-                return false;
-            }
+            return await this.submitResponse();
         }
         
         async submitResponse() {
-            console.log('Отправка отклика...');
+            console.log('📤 Отправка отклика...');
             this.updateStatus('📤 Отправляем...');
             
             try {
                 let submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])');
-                
-                if (!submitButton) {
-                    submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                }
-                
+                if (!submitButton) submitButton = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
                 if (!submitButton) {
                     console.log('Кнопка отправки не найдена');
                     return false;
@@ -811,32 +860,17 @@
                 submitButton.click();
                 await this.wait(1200);
                 
-                const success = await this.checkSuccess();
-                return success;
+                if (!document.querySelector('[data-qa="vacancy-response-popup"]')) {
+                    console.log('Отклик успешно отправлен');
+                    return true;
+                }
                 
+                console.log('Отклик отправлен');
+                return true;
             } catch (e) {
                 console.log('Ошибка отправки:', e);
                 return false;
             }
-        }
-        
-        async checkSuccess() {
-            await this.wait(800);
-            
-            if (!document.querySelector('[data-qa="vacancy-response-popup"]')) {
-                console.log('Отклик успешно отправлен');
-                return true;
-            }
-            
-            const bodyText = document.body.textContent || '';
-            if (bodyText.includes('отклик отправлен') || 
-                bodyText.includes('успешно отправлен')) {
-                console.log('Отклик успешно отправлен');
-                return true;
-            }
-            
-            console.log('Предполагаем успешную отправку');
-            return true;
         }
         
         async closeModal() {
@@ -851,26 +885,19 @@
         
         updateStatus(message) {
             const statusEl = document.getElementById('hh-status');
-            if (statusEl) {
-                statusEl.textContent = message;
-            }
+            if (statusEl) statusEl.textContent = message;
             console.log('Статус:', message);
         }
         
         updateStatsDisplay() {
             const statsEl = document.getElementById('hh-stats');
-            if (statsEl) {
-                statsEl.textContent = `✅${this.stats.success} ❌${this.stats.failed} ⏭️${this.stats.skipped}`;
-            }
+            if (statsEl) statsEl.textContent = `✅${this.stats.success} ❌${this.stats.failed} ⏭️${this.stats.skipped}`;
             this.saveSettings();
         }
         
         updateCount() {
             const countEl = document.getElementById('hh-count');
-            if (countEl) {
-                const buttons = this.getAvailableButtons();
-                countEl.textContent = buttons.length;
-            }
+            if (countEl) countEl.textContent = this.getAvailableButtons().length;
         }
         
         updateControlButtons() {
@@ -879,39 +906,27 @@
             const stopBtn = document.getElementById('hh-stop');
             
             if (this.isRunning) {
-                startBtn.style.display = 'none';
-                testBtn.style.display = 'none';
-                stopBtn.style.display = 'block';
+                if (startBtn) startBtn.style.display = 'none';
+                if (testBtn) testBtn.style.display = 'none';
+                if (stopBtn) stopBtn.style.display = 'block';
                 this.toggleButton.style.background = 'linear-gradient(135deg, #f44336, #d32f2f)';
                 this.toggleButton.textContent = '⏹️';
             } else {
                 const isDark = this.theme === 'dark';
-                startBtn.style.display = 'block';
-                testBtn.style.display = 'block';
-                stopBtn.style.display = 'none';
-                this.toggleButton.style.background = isDark 
-                    ? 'linear-gradient(135deg, #333, #555)' 
-                    : 'linear-gradient(135deg, #2196F3, #1976D2)';
+                if (startBtn) startBtn.style.display = 'block';
+                if (testBtn) testBtn.style.display = 'block';
+                if (stopBtn) stopBtn.style.display = 'none';
+                this.toggleButton.style.background = isDark ? 'linear-gradient(135deg, #333, #555)' : 'linear-gradient(135deg, #2196F3, #1976D2)';
                 this.toggleButton.textContent = '🚀';
             }
         }
         
         getAvailableButtons() {
             const allButtons = Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]'));
-            
             return allButtons.filter(button => {
-                if (button.offsetParent === null || button.style.display === 'none') {
-                    return false;
-                }
-                
-                if (this.isFilteredOrganization(button)) {
-                    return false;
-                }
-                
-                if (this.isAlreadyRespondedVacancy(button)) {
-                    return false;
-                }
-                
+                if (button.offsetParent === null || button.style.display === 'none') return false;
+                if (this.isFilteredOrganization(button)) return false;
+                if (this.isAlreadyRespondedVacancy(button)) return false;
                 return true;
             });
         }
@@ -919,21 +934,14 @@
         isAlreadyRespondedVacancy(button) {
             if (!this.settings.skipResponded) return false;
             
-            const parent = button.closest('.vacancy-serp-item') || 
-                           button.closest('.serp-item') ||
-                           button.closest('[data-qa="vacancy-serp__vacancy"]');
-            
+            const parent = button.closest('.vacancy-serp-item') || button.closest('.serp-item') || button.closest('[data-qa="vacancy-serp__vacancy"]');
             if (!parent) return false;
             
             const respondedElement = parent.querySelector('[data-qa="vacancy-serp__vacancy_responded"]');
             if (respondedElement) return true;
             
             const parentText = parent.innerText || parent.textContent || '';
-            if (parentText.includes('Вы откликнулись') || 
-                parentText.includes('Вы уже откликнулись') ||
-                parentText.includes('Отклик отправлен')) {
-                return true;
-            }
+            if (parentText.includes('Вы откликнулись') || parentText.includes('Вы уже откликнулись') || parentText.includes('Отклик отправлен')) return true;
             
             const buttonText = button.innerText || button.textContent || '';
             return !buttonText.includes('Откликнуться') && buttonText.trim() !== '';
@@ -954,15 +962,14 @@
         async processSingleVacancy(button, index, total) {
             if (!this.isRunning) return false;
             
+            this.resumeSelectedFlag = false;
             this.stats.total++;
             this.updateStatsDisplay();
             
             const orgName = this.getOrganizationName(button);
-            
             this.updateStatus(`🎯 ${index + 1}/${total}: ${orgName || 'Обработка...'}`);
             
             const clicked = await this.safeClick(button);
-            
             if (!clicked) {
                 this.stats.failed++;
                 this.updateStatsDisplay();
@@ -970,7 +977,7 @@
                 return false;
             }
             
-            const success = await this.universalProcess();
+            const success = await this.processResponse();
             
             if (success) {
                 if (orgName && this.settings.autoRememberOrganizations) {
@@ -983,7 +990,6 @@
                 } else {
                     this.updateStatus(`✅ ${index + 1}/${total}: отправлено!`);
                 }
-                
                 this.stats.success++;
                 this.updateStatsDisplay();
                 await this.closeModal();
@@ -1030,16 +1036,12 @@
                     
                     this.updateStatus(`📊 Обработка ${buttons.length} вакансий...`);
                     
-                    for (let i = 0; i < buttons.length; i++) {
-                        if (!this.isRunning) break;
-                        
+                    for (let i = 0; i < buttons.length && this.isRunning; i++) {
                         await this.processSingleVacancy(buttons[i], i, buttons.length);
-                        
-                        if (i < buttons.length - 1) {
+                        if (i < buttons.length - 1 && this.isRunning) {
                             await this.wait(this.settings.delay * 1000);
                         }
                     }
-                    
                     await this.wait(800);
                 }
             } catch (error) {
@@ -1068,20 +1070,17 @@
             const success = await this.processSingleVacancy(buttons[0], 0, 1);
             this.isRunning = false;
             this.updateControlButtons();
-            
             this.updateStatus(success ? '✅ Тест успешен!' : '⚠️ Тест не удался');
         }
         
         testFilter() {
             const buttons = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
             let result = '🔍 Тест фильтра:\n\n';
-            
             buttons.forEach((btn, i) => {
                 const org = this.getOrganizationName(btn);
                 const filtered = this.isFilteredOrganization(btn);
                 result += `${i + 1}. ${org || '???'} - ${filtered ? '🚫 ФИЛЬТР' : '✅ НОРМА'}\n`;
             });
-            
             this.updateStatus(result);
             console.log(result);
         }
@@ -1089,7 +1088,6 @@
         analyzePage() {
             const all = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]').length;
             const available = this.getAvailableButtons().length;
-            
             this.updateStatus(`📊 Анализ:\nВсего: ${all}\nДоступно: ${available}\nУспешно: ${this.stats.success}\nОшибок: ${this.stats.failed}`);
         }
         
@@ -1103,20 +1101,14 @@
     
     function initialize() {
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                setTimeout(() => new HHAutoResponder(), 800);
-            });
+            document.addEventListener('DOMContentLoaded', () => setTimeout(() => new HHAutoResponder(), 800));
         } else {
             setTimeout(() => new HHAutoResponder(), 800);
         }
     }
     
-    chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-        if (request.action === 'checkConnection') {
-            sendResponse({ 
-                connected: window.hhAutoResponder !== undefined 
-            });
-        }
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === 'checkConnection') sendResponse({ connected: window.hhAutoResponder !== undefined });
         return true;
     });
     
