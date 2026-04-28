@@ -1,8 +1,116 @@
-// ===== HH АВТО-ОТКЛИК v1.3.1 (АВТОФИЛЬТР ДЛЯ ПРЯМЫХ ОТКЛИКОВ) =====
+// ===== HH АВТО-ОТКЛИК v1.4.0 (АВТОФИЛЬТР + АНТИ-ФРОД) =====
 (function() {
     'use strict';
     
-    console.log('=== HH Авто-отклик v1.3.1 ===');
+// ===== АНТИ-ФРОД: БЛОКИРОВКА СКАНИРОВАНИЯ ПОРТОВ =====
+(() => {
+    'use strict';
+
+    const isLocal = (url) => {
+        try {
+            const u = new URL(String(url), location.href);
+            const host = u.hostname.toLowerCase();
+            return (
+                host === "127.0.0.1" ||
+                host === "localhost" ||
+                host === "::1" ||
+                host === "0.0.0.0"
+            );
+        } catch {
+            return false;
+        }
+    };
+
+    // fetch
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (url, ...args) => {
+        if (isLocal(url)) return Promise.reject(new TypeError("blocked"));
+        return origFetch.call(globalThis, url, ...args);
+    };
+
+    // XMLHttpRequest
+    const open = XMLHttpRequest.prototype.open;
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (m, url, ...a) {
+        this.__url = url;
+        return open.call(this, m, url, ...a);
+    };
+    XMLHttpRequest.prototype.send = function (...a) {
+        if (isLocal(this.__url)) return;
+        return send.apply(this, a);
+    };
+
+    // WebSocket
+    const NativeWS = globalThis.WebSocket;
+    globalThis.WebSocket = class extends NativeWS {
+        constructor(url, protocols) {
+            if (isLocal(url)) throw new Error("blocked");
+            super(url, protocols);
+        }
+    };
+
+    // EventSource
+    const NativeES = globalThis.EventSource;
+    globalThis.EventSource = class extends NativeES {
+        constructor(url, options) {
+            if (isLocal(url)) throw new Error("blocked");
+            super(url, options);
+        }
+    };
+
+    // sendBeacon
+    if (navigator.sendBeacon) {
+        const orig = navigator.sendBeacon;
+        navigator.sendBeacon = function (url, data) {
+            if (isLocal(url)) return false;
+            return orig.call(this, url, data);
+        };
+    }
+
+    // Image.src
+    const imgDesc = Object.getOwnPropertyDescriptor(Image.prototype, "src");
+    if (imgDesc?.set) {
+        Object.defineProperty(Image.prototype, "src", {
+            get: imgDesc.get,
+            set(v) {
+                if (isLocal(v)) return;
+                return imgDesc.set.call(this, v);
+            },
+            configurable: true
+        });
+    }
+
+    // iframe.src
+    const iframeDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+    if (iframeDesc?.set) {
+        Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+            get: iframeDesc.get,
+            set(v) {
+                if (isLocal(v)) return;
+                return iframeDesc.set.call(this, v);
+            },
+            configurable: true
+        });
+    }
+
+    // setAttribute для img и iframe
+    const origSetAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+        const tag = this.tagName;
+        if (
+            (tag === "IMG" || tag === "IFRAME") &&
+            name.toLowerCase() === "src" &&
+            isLocal(value)
+        ) {
+            return;
+        }
+        return origSetAttr.call(this, name, value);
+    };
+
+})();
+// ===== КОНЕЦ АНТИ-ФРОД =====
+    
+    console.log('=== HH Авто-отклик v1.4.0 ===');
     
     if (!window.location.href.includes('hh.ru')) {
         console.log('⚠️ Не страница HH.ru, скрипт не активирован');
@@ -137,7 +245,7 @@
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.3.1</h3>
+                        <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.4.0 🛡️</h3>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div style="display: flex; align-items: center; gap: 6px;">
@@ -234,7 +342,7 @@
                     <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer;">🧹 Очистить автофильтр</button>
                 </div>
                 
-                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX</div>
+                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Анти-фрод активен</div>
             `;
             
             document.body.appendChild(this.panel);
@@ -467,19 +575,6 @@
             this.toggleButton.style.background = btnBg;
         }
         
-        // ===== ПОЛУЧЕНИЕ НАЗВАНИЯ ОРГАНИЗАЦИИ =====
-        
-        getCurrentOrganizationName() {
-            // Пытаемся получить название организации из открытой модалки прямого отклика
-            const directModal = document.querySelector('[role="alertdialog"][aria-modal="true"]');
-            if (directModal) {
-                // В модалке прямого отклика нет прямого указания организации,
-                // но мы можем получить её из карточки позже
-                return null;
-            }
-            return null;
-        }
-        
         getOrganizationNameFromCard(button) {
             const vacancyCard = button.closest('[data-qa="vacancy-serp__vacancy"]') || 
                                button.closest('.vacancy-card--n77Dj8TY8VIUF0yM') ||
@@ -642,7 +737,6 @@
             if (isDirect) {
                 console.log(`🚫 Прямой отклик (переход на сайт) для "${organizationName}" - пропускаем и добавляем в автофильтр`);
                 
-                // Добавляем организацию в автофильтр
                 if (organizationName && this.settings.autoRememberOrganizations) {
                     this.addToAutoFilter(organizationName);
                 }
@@ -800,7 +894,6 @@
         async processResponse(organizationName) {
             console.log('🔄 Обработка отклика...');
             
-            // Проверяем прямой отклик и добавляем организацию в автофильтр
             const isDirectModal = await this.checkAndCloseDirectResponseModal(organizationName);
             if (isDirectModal) {
                 this.stats.skipped++;
@@ -1117,11 +1210,17 @@
         }
     }
     
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === 'checkConnection') sendResponse({ connected: window.hhAutoResponder !== undefined });
-        return true;
-    });
+    try {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (request.action === 'checkConnection') sendResponse({ connected: window.hhAutoResponder !== undefined });
+            return true;
+        });
+    } catch (e) {}
     
-    initialize();
+    try {
+        initialize();
+    } catch (e) {
+        console.log('Перезагрузите страницу');
+    }
     
 })();
