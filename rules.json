@@ -1,0 +1,70 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "127.0.0.1",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "script",
+        "image",
+        "sub_frame",
+        "ping",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "localhost",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "script",
+        "image",
+        "sub_frame",
+        "ping",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "::1",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "script",
+        "image",
+        "sub_frame",
+        "ping",
+        "websocket",
+        "other"
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "0.0.0.0",
+      "resourceTypes": [
+        "xmlhttprequest",
+        "script",
+        "image",
+        "sub_frame",
+        "ping",
+        "websocket",
+        "other"
+      ]
+    }
+  }
+]
