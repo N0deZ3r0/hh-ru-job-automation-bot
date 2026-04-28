@@ -91,24 +91,6 @@
   },
   {
     "id": 11,
-    "priority": 3,
-    "action": { "type": "block" },
-    "condition": {
-      "urlFilter": "650.696cd6ab57025f1a.js",
-      "resourceTypes": ["script"]
-    }
-  },
-  {
-    "id": 12,
-    "priority": 3,
-    "action": { "type": "block" },
-    "condition": {
-      "urlFilter": "1935.2ba49d6e82a3c469.js",
-      "resourceTypes": ["script"]
-    }
-  },
-  {
-    "id": 13,
     "priority": 1,
     "action": {
       "type": "modifyHeaders",
