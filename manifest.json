@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "HH Авто-отклик",
   "version": "1.4.0",
-  "description": "Автоматический отклик на вакансии HH.ru со встроенной защитой от сканирования портов",
+  "description": "Автоматический отклик на вакансии HH.ru с защитой приватности",
   "permissions": [
     "storage",
-    "declarativeNetRequest"
+    "declarativeNetRequest",
+    "scripting"
   ],
   "host_permissions": ["*://*.hh.ru/*"],
   "declarative_net_request": {
@@ -30,7 +31,8 @@
     {
       "matches": ["*://*.hh.ru/*"],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "icons": {

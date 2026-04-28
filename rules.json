@@ -5,15 +5,7 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "127.0.0.1",
-      "resourceTypes": [
-        "xmlhttprequest",
-        "script",
-        "image",
-        "sub_frame",
-        "ping",
-        "websocket",
-        "other"
-      ]
+      "resourceTypes": ["xmlhttprequest", "script", "image", "sub_frame", "ping", "websocket", "other"]
     }
   },
   {
@@ -22,15 +14,7 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "localhost",
-      "resourceTypes": [
-        "xmlhttprequest",
-        "script",
-        "image",
-        "sub_frame",
-        "ping",
-        "websocket",
-        "other"
-      ]
+      "resourceTypes": ["xmlhttprequest", "script", "image", "sub_frame", "ping", "websocket", "other"]
     }
   },
   {
@@ -39,15 +23,7 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "::1",
-      "resourceTypes": [
-        "xmlhttprequest",
-        "script",
-        "image",
-        "sub_frame",
-        "ping",
-        "websocket",
-        "other"
-      ]
+      "resourceTypes": ["xmlhttprequest", "script", "image", "sub_frame", "ping", "websocket", "other"]
     }
   },
   {
@@ -56,15 +32,95 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "0.0.0.0",
-      "resourceTypes": [
-        "xmlhttprequest",
-        "script",
-        "image",
-        "sub_frame",
-        "ping",
-        "websocket",
-        "other"
+      "resourceTypes": ["xmlhttprequest", "script", "image", "sub_frame", "ping", "websocket", "other"]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "fingerprint",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "/track",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 7,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "/collect",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 8,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "/beacon",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 9,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "/analytics",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 10,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "/metrics",
+      "resourceTypes": ["xmlhttprequest", "script"]
+    }
+  },
+  {
+    "id": 11,
+    "priority": 3,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "650.696cd6ab57025f1a.js",
+      "resourceTypes": ["script"]
+    }
+  },
+  {
+    "id": 12,
+    "priority": 3,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "1935.2ba49d6e82a3c469.js",
+      "resourceTypes": ["script"]
+    }
+  },
+  {
+    "id": 13,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "x-fingerprint", "operation": "remove" },
+        { "header": "x-device-id", "operation": "remove" },
+        { "header": "x-client-id", "operation": "remove" }
       ]
+    },
+    "condition": {
+      "urlFilter": "*",
+      "resourceTypes": ["xmlhttprequest"]
     }
   }
 ]
