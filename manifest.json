@@ -1,23 +1,30 @@
 {
   "manifest_version": 3,
-  "name": "HH Авто-отклик",
-  "version": "1.4.0",
-  "description": "Автоматический отклик на вакансии HH.ru с защитой приватности",
+  "name": "HH Авто-отклик ",
+  "version": "1.5.0",
+  "description": "Авто-отклик HH.ru с защитой",
   "permissions": [
+    "activeTab",
     "storage",
     "declarativeNetRequest",
     "scripting"
   ],
-  "host_permissions": ["*://*.hh.ru/*"],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "rules",
-        "enabled": true,
-        "path": "rules.json"
-      }
-    ]
-  },
+  "host_permissions": [
+    "*://*.hh.ru/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.hh.ru/*"],
+      "js": ["protect_loader.js", "protect.js", "content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["protect.wasm"],
+      "matches": ["*://*.hh.ru/*"]
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -27,14 +34,15 @@
       "128": "icons/icon128.png"
     }
   },
-  "content_scripts": [
-    {
-      "matches": ["*://*.hh.ru/*"],
-      "js": ["content.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    }
-  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_1",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

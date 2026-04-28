@@ -1,6 +1,107 @@
-// ===== HH АВТО-ОТКЛИК v1.4.0 (АВТОФИЛЬТР + TECH GUARD) =====
+// ===== HH АВТО-ОТКЛИК v1.5.0 (АВТОФИЛЬТР + TECH GUARD + WASM) =====
 (function() {
     'use strict';
+    
+    // ===== ТИХОЕ ПОДАВЛЕНИЕ ОШИБОК В КОНСОЛИ (без отключения функционала) =====
+    (function() {
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        const originalLog = console.log;
+        
+        const silentPatterns = [
+            'ERR_BLOCKED_BY_CLIENT',
+            'anatskytics',
+            'fingerprint',
+            'TargetAds',
+            'weborama',
+            'skcrtxr',
+            'Canvas2D',
+            'willReadFrequently'
+        ];
+        
+        console.error = function(...args) {
+            const msg = (args[0] || '').toString();
+            if (msg.includes('HH Авто') || msg.includes('🛡️') || msg.includes('✅') || 
+                msg.includes('❌') || msg.includes('⚠️') || msg.includes('🎯')) {
+                return originalError.apply(this, args);
+            }
+            for (const p of silentPatterns) {
+                if (msg.includes(p)) return;
+            }
+            return originalError.apply(this, args);
+        };
+        
+        console.warn = function(...args) {
+            const msg = (args[0] || '').toString();
+            if (msg.includes('HH Авто') || msg.includes('🛡️')) {
+                return originalWarn.apply(this, args);
+            }
+            for (const p of silentPatterns) {
+                if (msg.includes(p)) return;
+            }
+            return originalWarn.apply(this, args);
+        };
+        
+        console.log = function(...args) {
+            return originalLog.apply(this, args);
+        };
+        
+        window.addEventListener('unhandledrejection', (e) => {
+            const msg = e.reason?.toString() || '';
+            for (const p of silentPatterns) {
+                if (msg.includes(p)) {
+                    e.preventDefault();
+                    return false;
+                }
+            }
+        });
+        
+        window.addEventListener('error', (e) => {
+            const msg = e.message || '';
+            for (const p of silentPatterns) {
+                if (msg.includes(p)) {
+                    e.preventDefault();
+                    return false;
+                }
+            }
+        });
+    })();
+    
+    // ===== WASM INTEGRATION =====
+    let wasmModule = null;
+    
+    async function initWasm() {
+        try {
+            if (typeof ProtectModule === 'function') {
+                wasmModule = await ProtectModule();
+                if (wasmModule._init_protect) wasmModule._init_protect();
+                console.log('🛡️ WASM модуль защиты активирован');
+                return true;
+            }
+        } catch (e) {
+            console.warn('⚠️ WASM не загружен, JS fallback');
+        }
+        
+        // JS fallback
+        var heap = new ArrayBuffer(64 * 1024 * 1024);
+        wasmModule = {
+            HEAP8: new Int8Array(heap),
+            _init_protect: function() {},
+            _should_block_request: function(ptr) {
+                var blocked = ['fingerprint','anatskytics','collect','track','metrics','beacon','analytics'];
+                var url = '';
+                var v = new Uint8Array(heap, ptr);
+                for (var i = 0; v[i]; i++) url += String.fromCharCode(v[i]);
+                return blocked.some(function(p) { return url.includes(p); }) ? 1 : 0;
+            },
+            _add_audio_noise: function(ptr, len) {
+                var d = new Float32Array(heap, ptr, len);
+                for (var i = 0; i < len; i++) d[i] += (Math.random() - 0.5) * 0.15;
+            }
+        };
+        console.log('🛡️ JS fallback активирован');
+        return false;
+    }
     
     // ===== TECH GUARD: БЛОКИРОВКА СКАНИРОВАНИЯ ПОРТОВ =====
     try {
@@ -9,15 +110,23 @@
                 try {
                     const u = new URL(String(url), location.href);
                     const host = u.hostname.toLowerCase();
-                    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "0.0.0.0";
+                    return host === "127.0.0.1" || host === "localhost" || 
+                           host === "::1" || host === "0.0.0.0" ||
+                           host.match(/^192\.168\.\d+\.\d+$/) ||
+                           host.match(/^10\.\d+\.\d+\.\d+$/) ||
+                           host.match(/^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/);
                 } catch {
                     return false;
                 }
             };
 
             const origFetch = globalThis.fetch;
-            globalThis.fetch = (url, ...args) => {
-                if (isLocal(url)) return Promise.reject(new TypeError("blocked"));
+            globalThis.fetch = function(url, ...args) {
+                if (typeof url === 'string' && url.includes('protect.wasm')) return origFetch.call(globalThis, url, ...args);
+                if (isLocal(url)) {
+                    console.log('🛡️ Заблокирован локальный запрос:', url);
+                    return Promise.reject(new TypeError("blocked"));
+                }
                 return origFetch.call(globalThis, url, ...args);
             };
 
@@ -27,8 +136,12 @@
                 this.__url = url;
                 return open.call(this, m, url, ...a);
             };
+            
             XMLHttpRequest.prototype.send = function(...a) {
-                if (isLocal(this.__url)) return;
+                if (isLocal(this.__url)) {
+                    console.log('🛡️ Заблокирован XHR:', this.__url);
+                    return;
+                }
                 return send.apply(this, a);
             };
 
@@ -60,7 +173,10 @@
             if (imgDesc?.set) {
                 Object.defineProperty(Image.prototype, "src", {
                     get: imgDesc.get,
-                    set(v) { if (isLocal(v)) return; return imgDesc.set.call(this, v); },
+                    set(v) { 
+                        if (isLocal(v)) return; 
+                        return imgDesc.set.call(this, v); 
+                    },
                     configurable: true
                 });
             }
@@ -69,7 +185,10 @@
             if (iframeDesc?.set) {
                 Object.defineProperty(HTMLIFrameElement.prototype, "src", {
                     get: iframeDesc.get,
-                    set(v) { if (isLocal(v)) return; return iframeDesc.set.call(this, v); },
+                    set(v) { 
+                        if (isLocal(v)) return; 
+                        return iframeDesc.set.call(this, v); 
+                    },
                     configurable: true
                 });
             }
@@ -77,7 +196,8 @@
             const origSetAttr = Element.prototype.setAttribute;
             Element.prototype.setAttribute = function(name, value) {
                 const tag = this.tagName;
-                if ((tag === "IMG" || tag === "IFRAME") && name.toLowerCase() === "src" && isLocal(value)) return;
+                if ((tag === "IMG" || tag === "IFRAME") && 
+                    name.toLowerCase() === "src" && isLocal(value)) return;
                 return origSetAttr.call(this, name, value);
             };
         })();
@@ -166,25 +286,37 @@
                 return a;
             };
 
-            // Блокировка отправки /fingerprint
+            // Блокировка отправки /fingerprint и /anatskytics
             const origSendBeacon = navigator.sendBeacon;
             if (origSendBeacon) {
                 navigator.sendBeacon = function(url, data) {
-                    if (typeof url === 'string' && url.includes('/fingerprint')) return false;
+                    if (typeof url === 'string' && (url.includes('/fingerprint') || url.includes('/anatskytics'))) return false;
                     return origSendBeacon.call(this, url, data);
                 };
             }
 
             const _fetch = window.fetch;
             window.fetch = function(url, ...args) {
-                if (typeof url === 'string' && url.includes('/fingerprint')) return Promise.reject(new TypeError('blocked'));
+                if (typeof url === 'string') {
+                    if (url.includes('protect.wasm')) return _fetch.call(this, url, ...args);
+                    if (url.includes('/fingerprint') || url.includes('/anatskytics')) return Promise.reject(new TypeError('blocked'));
+                }
                 return _fetch.call(this, url, ...args);
+            };
+            
+            const origXHRSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function(...args) {
+                if (this.__url && (this.__url.includes('/anatskytics') || this.__url.includes('/fingerprint'))) {
+                    this.abort();
+                    return;
+                }
+                return origXHRSend.apply(this, args);
             };
         })();
     } catch (e) {}
     // ===== КОНЕЦ БЛОКИРОВКИ FINGERPRINT =====
     
-    console.log('=== HH Авто-отклик v1.4.0 ===');
+    console.log('=== HH Авто-отклик v1.5.0 (Тихий режим) ===');
     
     if (!window.location.href.includes('hh.ru')) {
         console.log('⚠️ Не страница HH.ru, скрипт не активирован');
@@ -300,7 +432,7 @@
             
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.4.0 🛡️</h3>
+                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.5.0 🛡️</h3>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span id="hh-moon-icon" style="font-size: 14px; color: ${isDark ? '#4CAF50' : '#666'};">☀️</span>
                         <div id="hh-theme-slider" style="position: relative; width: 44px; height: 20px; cursor: pointer; border-radius: 12px; background: ${isDark ? '#2d2d2d' : '#e0e0e0'}; overflow: hidden;">
@@ -363,7 +495,7 @@
                     <button id="hh-clear" style="flex: 1; padding: 8px; background: #607D8B; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Очистить статистику</button>
                     <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer;">🧹 Очистить автофильтр</button>
                 </div>
-                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard активен</div>
+                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard </div>
             `;
             
             document.body.appendChild(this.panel);
@@ -740,6 +872,10 @@
     
     try { chrome.runtime.onMessage.addListener((request, sender, sendResponse) => { if (request.action === 'checkConnection') sendResponse({ connected: window.hhAutoResponder !== undefined }); return true; }); } catch (e) {}
     
-    try { initialize(); } catch (e) { console.log('Перезагрузите страницу'); }
+    initWasm().then(() => {
+        initialize();
+    }).catch(() => {
+        initialize();
+    });
     
 })();

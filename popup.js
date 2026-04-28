@@ -1,77 +1,35 @@
-// popup.js
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Popup загружен');
-    
-    // Сразу показываем базовый статус
-    updateStatus('✅ Расширение активировано', '✅');
-    
-    // Проверяем подключение к странице
+    updateStatus('✅ Расширение активировано', '🚀');
     checkConnection();
 });
 
-// Обновить статус в popup
-function updateStatus(text, icon = '✅') {
-    const statusElement = document.getElementById('status');
-    const statusIcon = document.getElementById('statusIcon');
-    const dots = document.getElementById('connectionDots');
-    
-    if (statusElement) {
-        statusElement.textContent = text;
-        statusElement.className = 'status-text ' + 
-            (text.includes('✅') || text.includes('Расширение активировано') ? 'status-connected' : 'status-disconnected');
+function updateStatus(text, icon) {
+    var el = document.getElementById('status');
+    var ic = document.getElementById('statusIcon');
+    if (el) {
+        el.textContent = text;
+        el.className = 'status-text ' + (text.includes('✅') ? 'status-connected' : 'status-disconnected');
     }
-    
-    if (statusIcon) {
-        statusIcon.textContent = icon;
-    }
-    
-    if (dots) {
-        dots.style.display = text.includes('Проверка') ? 'flex' : 'none';
-    }
+    if (ic) ic.textContent = icon || '🚀';
 }
 
-// Проверить подключение к странице
 async function checkConnection() {
-    // Показываем статус проверки
-    updateStatus('🔍 Проверка подключения...', '🔍');
-    
     try {
-        const [tab] = await chrome.tabs.query({ 
-            active: true, 
-            currentWindow: true 
-        });
-        
+        var [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab || !tab.url || !tab.url.includes('hh.ru')) {
-            updateStatus('🌐 Откройте страницу HH.ru', '🌐');
+            updateStatus('🌐 Откройте HH.ru', '🌐');
             return;
         }
-        
-        // Пробуем отправить сообщение
         try {
-            const response = await chrome.tabs.sendMessage(tab.id, {
-                action: 'checkConnection'
-            });
-            
-            if (response && response.connected) {
-                updateStatus('✅ Расширение активировано', '✅');
-            } else {
-                updateStatus('⚠️ Обновите страницу HH.ru', '⚠️');
-            }
-        } catch (error) {
-            console.log('Content script не отвечает:', error);
-            updateStatus('⚠️ Обновите страницу HH.ru', '⚠️');
+            var response = await chrome.tabs.sendMessage(tab.id, { action: 'checkConnection' });
+            updateStatus(response && response.connected ? '✅ Активно' : '⚠️ Обновите страницу', '🚀');
+        } catch(e) {
+            updateStatus('⚠️ Обновите страницу', '⚠️');
         }
-        
-    } catch (error) {
-        console.log('Ошибка подключения:', error);
-        updateStatus('❌ Ошибка подключения', '❌');
+    } catch(e) {
+        updateStatus('❌ Ошибка', '❌');
     }
 }
 
-// При клике на popup проверяем соединение
-document.body.addEventListener('click', function() {
-    checkConnection();
-});
-
-// Проверяем каждые 30 секунд если popup открыт
+document.body.addEventListener('click', checkConnection);
 setInterval(checkConnection, 30000);
