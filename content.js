@@ -2,113 +2,87 @@
 (function() {
     'use strict';
     
-// ===== АНТИ-ФРОД: БЛОКИРОВКА СКАНИРОВАНИЯ ПОРТОВ =====
-(() => {
-    'use strict';
+    // ===== АНТИ-ФРОД: БЛОКИРОВКА СКАНИРОВАНИЯ ПОРТОВ =====
+    try {
+        (() => {
+            const isLocal = (url) => {
+                try {
+                    const u = new URL(String(url), location.href);
+                    const host = u.hostname.toLowerCase();
+                    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "0.0.0.0";
+                } catch {
+                    return false;
+                }
+            };
 
-    const isLocal = (url) => {
-        try {
-            const u = new URL(String(url), location.href);
-            const host = u.hostname.toLowerCase();
-            return (
-                host === "127.0.0.1" ||
-                host === "localhost" ||
-                host === "::1" ||
-                host === "0.0.0.0"
-            );
-        } catch {
-            return false;
-        }
-    };
+            const origFetch = globalThis.fetch;
+            globalThis.fetch = (url, ...args) => {
+                if (isLocal(url)) return Promise.reject(new TypeError("blocked"));
+                return origFetch.call(globalThis, url, ...args);
+            };
 
-    // fetch
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = (url, ...args) => {
-        if (isLocal(url)) return Promise.reject(new TypeError("blocked"));
-        return origFetch.call(globalThis, url, ...args);
-    };
+            const open = XMLHttpRequest.prototype.open;
+            const send = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(m, url, ...a) {
+                this.__url = url;
+                return open.call(this, m, url, ...a);
+            };
+            XMLHttpRequest.prototype.send = function(...a) {
+                if (isLocal(this.__url)) return;
+                return send.apply(this, a);
+            };
 
-    // XMLHttpRequest
-    const open = XMLHttpRequest.prototype.open;
-    const send = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function (m, url, ...a) {
-        this.__url = url;
-        return open.call(this, m, url, ...a);
-    };
-    XMLHttpRequest.prototype.send = function (...a) {
-        if (isLocal(this.__url)) return;
-        return send.apply(this, a);
-    };
+            const NativeWS = globalThis.WebSocket;
+            globalThis.WebSocket = class extends NativeWS {
+                constructor(url, protocols) {
+                    if (isLocal(url)) throw new Error("blocked");
+                    super(url, protocols);
+                }
+            };
 
-    // WebSocket
-    const NativeWS = globalThis.WebSocket;
-    globalThis.WebSocket = class extends NativeWS {
-        constructor(url, protocols) {
-            if (isLocal(url)) throw new Error("blocked");
-            super(url, protocols);
-        }
-    };
+            const NativeES = globalThis.EventSource;
+            globalThis.EventSource = class extends NativeES {
+                constructor(url, options) {
+                    if (isLocal(url)) throw new Error("blocked");
+                    super(url, options);
+                }
+            };
 
-    // EventSource
-    const NativeES = globalThis.EventSource;
-    globalThis.EventSource = class extends NativeES {
-        constructor(url, options) {
-            if (isLocal(url)) throw new Error("blocked");
-            super(url, options);
-        }
-    };
+            if (navigator.sendBeacon) {
+                const orig = navigator.sendBeacon;
+                navigator.sendBeacon = function(url, data) {
+                    if (isLocal(url)) return false;
+                    return orig.call(this, url, data);
+                };
+            }
 
-    // sendBeacon
-    if (navigator.sendBeacon) {
-        const orig = navigator.sendBeacon;
-        navigator.sendBeacon = function (url, data) {
-            if (isLocal(url)) return false;
-            return orig.call(this, url, data);
-        };
-    }
+            const imgDesc = Object.getOwnPropertyDescriptor(Image.prototype, "src");
+            if (imgDesc?.set) {
+                Object.defineProperty(Image.prototype, "src", {
+                    get: imgDesc.get,
+                    set(v) { if (isLocal(v)) return; return imgDesc.set.call(this, v); },
+                    configurable: true
+                });
+            }
 
-    // Image.src
-    const imgDesc = Object.getOwnPropertyDescriptor(Image.prototype, "src");
-    if (imgDesc?.set) {
-        Object.defineProperty(Image.prototype, "src", {
-            get: imgDesc.get,
-            set(v) {
-                if (isLocal(v)) return;
-                return imgDesc.set.call(this, v);
-            },
-            configurable: true
-        });
-    }
+            const iframeDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
+            if (iframeDesc?.set) {
+                Object.defineProperty(HTMLIFrameElement.prototype, "src", {
+                    get: iframeDesc.get,
+                    set(v) { if (isLocal(v)) return; return iframeDesc.set.call(this, v); },
+                    configurable: true
+                });
+            }
 
-    // iframe.src
-    const iframeDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "src");
-    if (iframeDesc?.set) {
-        Object.defineProperty(HTMLIFrameElement.prototype, "src", {
-            get: iframeDesc.get,
-            set(v) {
-                if (isLocal(v)) return;
-                return iframeDesc.set.call(this, v);
-            },
-            configurable: true
-        });
-    }
-
-    // setAttribute для img и iframe
-    const origSetAttr = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function (name, value) {
-        const tag = this.tagName;
-        if (
-            (tag === "IMG" || tag === "IFRAME") &&
-            name.toLowerCase() === "src" &&
-            isLocal(value)
-        ) {
-            return;
-        }
-        return origSetAttr.call(this, name, value);
-    };
-
-})();
-// ===== КОНЕЦ АНТИ-ФРОД =====
+            const origSetAttr = Element.prototype.setAttribute;
+            Element.prototype.setAttribute = function(name, value) {
+                const tag = this.tagName;
+                if ((tag === "IMG" || tag === "IFRAME") && name.toLowerCase() === "src" && isLocal(value)) return;
+                return origSetAttr.call(this, name, value);
+            };
+        })();
+    } catch (e) {}
+    // ===== КОНЕЦ АНТИ-ФРОД =====
     
     console.log('=== HH Авто-отклик v1.4.0 ===');
     
