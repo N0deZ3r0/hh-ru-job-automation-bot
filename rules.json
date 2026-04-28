@@ -104,5 +104,14 @@
       "urlFilter": "*",
       "resourceTypes": ["xmlhttprequest"]
     }
+  },
+  {
+    "id": 12,
+    "priority": 2,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "anatskytics",
+      "resourceTypes": ["xmlhttprequest"]
+    }
   }
 ]
