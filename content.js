@@ -381,7 +381,7 @@
             
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.5.0 ${WASM ? '🛡️' : ''}</h3>
+                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.5.0 ${WASM ? '️' : ''}</h3>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 10px; color: ${WASM ? '#4CAF50' : '#FF9800'};">${WASM ? 'WASM' : 'JS'}</span>
                         <span id="hh-moon-icon" style="font-size: 14px; color: ${isDark ? '#4CAF50' : '#666'};">☀️</span>
