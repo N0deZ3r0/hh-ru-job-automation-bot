@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "HH Авто-отклик ",
+  "name": "HH Авто-отклик Pro",
   "version": "1.5.0",
-  "description": "Авто-отклик HH.ru с защитой",
+  "description": "Авто-отклик HH.ru с максимальной WASM защитой",
   "permissions": [
     "activeTab",
     "storage",
@@ -12,10 +12,16 @@
   "host_permissions": [
     "*://*.hh.ru/*"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "content_scripts": [
     {
       "matches": ["*://*.hh.ru/*"],
-      "js": ["protect_loader.js", "protect.js", "content.js"],
+      "js": ["protect.js", "content.js"],
       "run_at": "document_start"
     }
   ],
@@ -42,11 +48,5 @@
         "path": "rules.json"
       }
     ]
-  },
-  "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
   }
 }
