@@ -10,7 +10,8 @@
         
         const silentPatterns = [
             'ERR_BLOCKED_BY_CLIENT', 'anatskytics', 'fingerprint',
-            'TargetAds', 'weborama', 'skcrtxr', 'Canvas2D', 'willReadFrequently'
+            'TargetAds', 'weborama', 'skcrtxr', 'Canvas2D', 'willReadFrequently',
+            'fallbackSharedVendor', 'notSharedVendors', 'Minified React error', 'MessagePort'
         ];
         
         console.error = function(...args) {
@@ -273,7 +274,7 @@
         })();
     } catch (e) {}
     
-    console.log('=== HH Авто-отклик v1.5.0 | WASM: ' + (WASM ? '✅' : '⚠️ JS') + ' ===');
+    console.log('=== HH Авто-отклик v1.5.0 ===');
     
     if (!window.location.href.includes('hh.ru')) {
         console.log('⚠️ Не страница HH.ru, скрипт не активирован');
@@ -311,7 +312,6 @@
                 this.saveSettings();
             }
             console.log('✅ HH Авто-отклик готов к работе!');
-            console.log('📋 Текущий автофильтр:', this.autoFilteredOrganizations);
             this.updateStatus('✅ Готов к работе на этой странице' + (WASM ? ' [WASM]' : ' [JS]'));
         }
         
@@ -471,7 +471,7 @@
             this.toggleButton.addEventListener('click', () => { this.panel.style.display = this.panel.style.display === 'none' ? 'block' : 'none'; });
             document.getElementById('hh-close-btn').addEventListener('click', () => { this.panel.style.display = 'none'; });
             document.getElementById('hh-settings-header')?.addEventListener('click', () => this.toggleSettings());
-            document.getElementById('hh-theme-slider')?.addEventListener('click', () => { this.toggleTheme(); this.applyThemeWithoutReload(); });
+            document.getElementById('hh-theme-slider')?.addEventListener('click', () => { this.toggleTheme(); this.createInterface(); this.setupEventListeners(); });
             document.getElementById('hh-start').addEventListener('click', () => this.startAutoProcess());
             document.getElementById('hh-test').addEventListener('click', () => this.testProcess());
             document.getElementById('hh-stop').addEventListener('click', () => this.stopAutoProcess());
@@ -518,7 +518,6 @@
             document.getElementById('hh-filter-text').addEventListener('input', (e) => {
                 this.filteredOrganizations = e.target.value.split(',').map(org => org.trim()).filter(org => org.length > 0);
                 this.saveSettings();
-                console.log('📋 Обновлён ручной фильтр:', this.filteredOrganizations);
             });
             
             setInterval(() => this.updateCount(), 5000);
@@ -532,8 +531,11 @@
             if (arrow) arrow.textContent = this.settingsCollapsed ? '▶' : '▼';
         }
         
-        toggleTheme() { this.theme = this.theme === 'dark' ? 'light' : 'dark'; this.saveSettings(); this.updateStatus(`✅ Тема изменена на ${this.theme === 'dark' ? 'тёмную' : 'светлую'}`); }
-        applyThemeWithoutReload() { this.createInterface(); }
+        toggleTheme() { 
+            this.theme = this.theme === 'dark' ? 'light' : 'dark'; 
+            this.saveSettings(); 
+            this.updateStatus(`✅ Тема изменена на ${this.theme === 'dark' ? 'тёмную' : 'светлую'}`);
+        }
         
         getOrganizationNameFromCard(button) {
             const vacancyCard = button.closest('[data-qa="vacancy-serp__vacancy"]') || button.closest('.vacancy-card--n77Dj8TY8VIUF0yM') || button.closest('[role="button"]');
@@ -556,7 +558,7 @@
                 if (!filter || !filter.trim()) continue;
                 const filterNormalized = filter.toLowerCase().trim();
                 if (orgNameNormalized === filterNormalized || orgNameNormalized.includes(filterNormalized) || filterNormalized.includes(orgNameNormalized)) {
-                    console.log(`🚫 РУЧНОЙ ФИЛЬТР: "${organizationName}" заблокирована`); return true;
+                    return true;
                 }
             }
             if (this.settings.autoRememberOrganizations && this.autoFilteredOrganizations.length > 0) {
@@ -564,7 +566,7 @@
                     if (!autoFilter || !autoFilter.trim()) continue;
                     const autoFilterNormalized = autoFilter.toLowerCase().trim();
                     if (orgNameNormalized === autoFilterNormalized || orgNameNormalized.includes(autoFilterNormalized) || autoFilterNormalized.includes(orgNameNormalized)) {
-                        console.log(`🚫 АВТОФИЛЬТР: "${organizationName}" заблокирована (была добавлена ранее)`); return true;
+                        return true;
                     }
                 }
             }
@@ -575,10 +577,9 @@
             if (!organizationName || !this.settings.autoRememberOrganizations) return false;
             const orgNameTrimmed = organizationName.trim();
             if (!orgNameTrimmed) return false;
-            if (this.autoFilteredOrganizations.some(org => org.toLowerCase() === orgNameTrimmed.toLowerCase())) { console.log(`⚠️ Организация "${orgNameTrimmed}" уже в автофильтре`); return false; }
+            if (this.autoFilteredOrganizations.some(org => org.toLowerCase() === orgNameTrimmed.toLowerCase())) return false;
             this.autoFilteredOrganizations.push(orgNameTrimmed);
             this.saveSettings();
-            console.log(`🤖 ДОБАВЛЕНО В АВТОФИЛЬТР: "${orgNameTrimmed}" (теперь в списке: ${this.autoFilteredOrganizations.length} организаций)`);
             return true;
         }
         
@@ -587,7 +588,7 @@
             let message = `🤖 АВТОФИЛЬТР (всего: ${this.autoFilteredOrganizations.length}):\n\n`;
             this.autoFilteredOrganizations.forEach((org, index) => { message += `${index + 1}. ${org}\n`; });
             message += `\n⚠️ Эти организации будут автоматически пропускаться в будущем.`;
-            this.updateStatus(message); console.log(message);
+            this.updateStatus(message);
         }
         
         clearAutoFilter() {
@@ -615,7 +616,6 @@
             if (directModal) { const title = directModal.querySelector('[data-qa="title"]'); if (title && title.textContent.includes('прямым откликом')) isDirect = true; }
             if (!isDirect) { const modalTitle = document.querySelector('[data-qa="magritte-alert-title"]'); if (modalTitle && modalTitle.textContent.includes('прямым откликом')) isDirect = true; }
             if (isDirect) {
-                console.log(`🚫 Прямой отклик (переход на сайт) для "${organizationName}" - пропускаем и добавляем в автофильтр`);
                 if (organizationName && this.settings.autoRememberOrganizations) this.addToAutoFilter(organizationName);
                 const cancelBtn = document.querySelector('[data-qa="vacancy-response-link-advertising-cancel"]');
                 if (cancelBtn) { cancelBtn.click(); await this.wait(500); return true; }
@@ -678,7 +678,6 @@
         }
         
         async processResponse(organizationName) {
-            console.log('🔄 Обработка отклика...');
             const isDirectModal = await this.checkAndCloseDirectResponseModal(organizationName);
             if (isDirectModal) { this.stats.skipped++; this.updateStatsDisplay(); return false; }
             for (let i = 0; i < 3; i++) { await this.closeChatIfOpened(); await this.wait(300); }
@@ -713,7 +712,7 @@
             if (closeBtn) { closeBtn.click(); await this.wait(300); }
         }
         
-        updateStatus(message) { const statusEl = document.getElementById('hh-status'); if (statusEl) statusEl.textContent = message; console.log('Статус:', message); }
+        updateStatus(message) { const statusEl = document.getElementById('hh-status'); if (statusEl) statusEl.textContent = message; }
         
         updateStatsDisplay() {
             const statsEl = document.getElementById('hh-stats');
@@ -734,7 +733,7 @@
             const available = [];
             for (const button of allButtons) {
                 if (button.offsetParent === null || button.style.display === 'none') continue;
-                if (this.isFilteredOrganization(button)) { console.log('⏭️ Вакансия пропущена (фильтр)'); continue; }
+                if (this.isFilteredOrganization(button)) continue;
                 if (this.isAlreadyRespondedVacancy(button)) continue;
                 available.push(button);
             }
@@ -764,10 +763,9 @@
             if (!clicked) { this.stats.failed++; this.updateStatsDisplay(); return false; }
             const success = await this.processResponse(orgName);
             if (success) {
-                if (orgName && this.settings.autoRememberOrganizations) { const added = this.addToAutoFilter(orgName); this.updateStatus(added ? `✅ ${index + 1}/${total}: отправлено! "${orgName}" добавлена в автофильтр` : `✅ ${index + 1}/${total}: отправлено!`); }
-                else { this.updateStatus(`✅ ${index + 1}/${total}: отправлено!`); }
+                if (orgName && this.settings.autoRememberOrganizations) { const added = this.addToAutoFilter(orgName); }
                 this.stats.success++; this.updateStatsDisplay(); await this.closeModal(); return true;
-            } else { this.updateStatus(`⚠️ ${index + 1}/${total}: не удалось`); await this.closeModal(); return false; }
+            } else { this.stats.failed++; this.updateStatsDisplay(); await this.closeModal(); return false; }
         }
         
         async startAutoProcess() {
@@ -801,9 +799,14 @@
         testFilter() {
             const buttons = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
             let result = '🔍 ТЕСТ ФИЛЬТРА:\n\n', filtered = 0;
-            buttons.forEach((btn, i) => { const org = this.getOrganizationNameFromCard(btn); const isFiltered = this.isFilteredOrganization(btn); if (isFiltered) filtered++; result += `${i + 1}. ${org || '???'} - ${isFiltered ? '🚫 ЗАБЛОКИРОВАНА' : '✅ РАЗРЕШЕНА'}\n`; });
+            buttons.forEach((btn, i) => { 
+                const org = this.getOrganizationNameFromCard(btn); 
+                const isFiltered = this.isFilteredOrganization(btn); 
+                if (isFiltered) filtered++; 
+                result += `${i + 1}. ${org || '???'} - ${isFiltered ? '🚫 ЗАБЛОКИРОВАНА' : '✅ РАЗРЕШЕНА'}\n`; 
+            });
             result += `\n📊 ИТОГО: ${filtered} из ${buttons.length} вакансий заблокировано фильтром`;
-            this.updateStatus(result); console.log(result);
+            this.updateStatus(result);
         }
         
         analyzePage() {
