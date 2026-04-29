@@ -11,7 +11,8 @@
         const silentPatterns = [
             'ERR_BLOCKED_BY_CLIENT', 'anatskytics', 'fingerprint',
             'TargetAds', 'weborama', 'skcrtxr', 'Canvas2D', 'willReadFrequently',
-            'fallbackSharedVendor', 'notSharedVendors', 'Minified React error', 'MessagePort'
+            'fallbackSharedVendor', 'notSharedVendors', 'Minified React error', 'MessagePort',
+            'Network Error', 'TargetAds_WebSDK'
         ];
         
         console.error = function(...args) {
@@ -47,7 +48,17 @@
             if (typeof ProtectModule === 'function') {
                 console.log('🛡️ Загрузка WASM...');
                 const Module = await ProtectModule({ locateFile: (path) => chrome.runtime.getURL(path) });
-                Module._seed_random(Date.now());
+                
+                // Инициализация ГСЧ криптографически безопасным seed
+                const seedArray = new Uint32Array(64);
+                crypto.getRandomValues(seedArray);
+                const seedPtr = Module._malloc(64 * 4);
+                for (let i = 0; i < 64; i++) {
+                    Module.setValue(seedPtr + i * 4, seedArray[i], 'i32');
+                }
+                Module._seed_random(seedPtr, 64);
+                Module._free(seedPtr);
+                
                 WASM = {
                     shouldBlockUrl(url) {
                         const bytes = new TextEncoder().encode(url);
@@ -381,7 +392,7 @@
             
             this.panel.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.5.0 ${WASM ? '️' : ''}</h3>
+                    <h3 style="margin: 0; color: #2196F3; font-size: 16px;">HH Авто-отклик v1.5.0 ${WASM ? '' : ''}</h3>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 10px; color: ${WASM ? '#4CAF50' : '#FF9800'};">${WASM ? 'WASM' : 'JS'}</span>
                         <span id="hh-moon-icon" style="font-size: 14px; color: ${isDark ? '#4CAF50' : '#666'};">☀️</span>
@@ -445,7 +456,7 @@
                     <button id="hh-clear" style="flex: 1; padding: 8px; background: #607D8B; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Очистить статистику</button>
                     <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer;">🧹 Очистить автофильтр</button>
                 </div>
-                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard | WASM ${WASM ? '✅' : '⚠️'}</div>
+                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard | WASM ${WASM ? '✅' : '⚠️'} | v1.5.0</div>
             `;
             
             document.body.appendChild(this.panel);
@@ -763,7 +774,7 @@
             if (!clicked) { this.stats.failed++; this.updateStatsDisplay(); return false; }
             const success = await this.processResponse(orgName);
             if (success) {
-                if (orgName && this.settings.autoRememberOrganizations) { const added = this.addToAutoFilter(orgName); }
+                if (orgName && this.settings.autoRememberOrganizations) { this.addToAutoFilter(orgName); }
                 this.stats.success++; this.updateStatsDisplay(); await this.closeModal(); return true;
             } else { this.stats.failed++; this.updateStatsDisplay(); await this.closeModal(); return false; }
         }
