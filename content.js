@@ -12,7 +12,8 @@
             'ERR_BLOCKED_BY_CLIENT', 'anatskytics', 'fingerprint',
             'TargetAds', 'weborama', 'skcrtxr', 'Canvas2D', 'willReadFrequently',
             'fallbackSharedVendor', 'notSharedVendors', 'Minified React error', 'MessagePort',
-            'Network Error', 'TargetAds_WebSDK'
+            'Network Error', 'TargetAds_WebSDK',
+            'hybrid.ai', 'dss.hybrid.ai', 'appsflyer', 'secureportal', '_txspjs'
         ];
         
         console.error = function(...args) {
@@ -39,6 +40,26 @@
             for (const p of silentPatterns) if (msg.includes(p)) { e.preventDefault(); return false; }
         });
     })();
+    
+    // ===== ОЧИСТКА ТРЕКИНГОВЫХ КЛЮЧЕЙ localStorage =====
+    (function() {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.includes('_tads') || key.includes('ss_incoming_params') || key.includes('ss_webReferrer')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+    })();
+    
+    // ===== БЛОКИРОВКА ГЛОБАЛЬНЫХ ОБЪЕКТОВ ТРЕКЕРОВ =====
+    try {
+        Object.defineProperty(window, '_txspjs', { value: undefined, writable: false, configurable: false });
+    } catch(e) {}
+    try {
+        Object.defineProperty(window, '_txq', { value: [], writable: false, configurable: false });
+    } catch(e) {}
     
     // ===== ЗАГРУЗКА WASM =====
     let WASM = null;
@@ -456,7 +477,7 @@
                     <button id="hh-clear" style="flex: 1; padding: 8px; background: #607D8B; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Очистить статистику</button>
                     <button id="hh-clear-auto-filter" style="flex: 1; padding: 8px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer;">🧹 Очистить автофильтр</button>
                 </div>
-                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard | WASM ${WASM ? '✅' : '⚠️'} | v1.5.0</div>
+                <div style="margin-top: 15px; font-size: 11px; color: ${secondaryText}; text-align: center; border-top: 1px solid ${inputBorder}; padding-top: 10px;">By ALEX 🛡️ Tech Guard | WASM ${WASM ? '✅' : '⚠️'}</div>
             `;
             
             document.body.appendChild(this.panel);
@@ -688,7 +709,8 @@
             await this.closeResumeDropdown(); return false;
         }
         
-        async processResponse(organizationName) {
+        async processResponse(organizationName, depth = 0) {
+            if (depth > 10) return false;
             const isDirectModal = await this.checkAndCloseDirectResponseModal(organizationName);
             if (isDirectModal) { this.stats.skipped++; this.updateStatsDisplay(); return false; }
             for (let i = 0; i < 3; i++) { await this.closeChatIfOpened(); await this.wait(300); }
@@ -705,9 +727,9 @@
                 return await this.submitResponse();
             }
             const addLetterButton = document.querySelector('[data-qa="add-cover-letter"]');
-            if (addLetterButton && !this.settings.skipCoverLetter) { addLetterButton.click(); await this.wait(800); return await this.processResponse(organizationName); }
+            if (addLetterButton && !this.settings.skipCoverLetter) { addLetterButton.click(); await this.wait(800); return await this.processResponse(organizationName, depth + 1); }
             const relocationButton = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(btn => btn.textContent && btn.textContent.trim() === 'Все равно откликнуться');
-            if (relocationButton) { relocationButton.click(); await this.wait(800); return await this.processResponse(organizationName); }
+            if (relocationButton) { relocationButton.click(); await this.wait(800); return await this.processResponse(organizationName, depth + 1); }
             return await this.submitResponse();
         }
         
