@@ -1,4 +1,4 @@
-// ===== HH AUTO RESPONDER v2.0  =====
+// ===== HH AUTO RESPONDER v2.0 — UI (2026 UNIFIED VIOLET THEME) =====
 (function() {
     'use strict';
 

@@ -4,7 +4,6 @@
 
     if (!window.location.href.includes('hh.ru')) return;
 
-    // Ждём готовности core
     function waitForCore() {
         return new Promise(resolve => {
             if (window.__HH_CORE_READY__) { resolve(); return; }
@@ -150,12 +149,7 @@
 
             clearAutoFilter() { if (this.autoFilteredOrganizations.length && confirm('Очистить автофильтр?')) { this.autoFilteredOrganizations = []; this.saveSettings(); this.updateStatus('🧹 Автофильтр очищен'); } }
 
-            async closeChatIfOpened() {
-                try {
-                    const b = document.querySelector('[data-qa="chatik-close-chatik"]');
-                    if (b?.offsetParent) { b.click(); await this.wait(500); return true; }
-                } catch(e) {} return false;
-            }
+            async closeChatIfOpened() { try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (b?.offsetParent) { b.click(); await this.wait(500); return true; } } catch(e) {} return false; }
 
             async checkAndCloseDirectResponseModal(o) {
                 let d = false;
@@ -171,12 +165,7 @@
                 return null;
             }
 
-            async openResumeDropdown() {
-                const rc = document.querySelector('[data-qa="resume-title"]');
-                if (rc) { const cl = rc.closest('[role="button"],[tabindex="0"]'); if (cl) { cl.click(); await this.wait(600); const dd = document.querySelector('[role="listbox"]'); if (dd?.offsetParent) return true; } }
-                return false;
-            }
-
+            async openResumeDropdown() { const rc = document.querySelector('[data-qa="resume-title"]'); if (rc) { const cl = rc.closest('[role="button"],[tabindex="0"]'); if (cl) { cl.click(); await this.wait(600); const dd = document.querySelector('[role="listbox"]'); if (dd?.offsetParent) return true; } } return false; }
             async closeResumeDropdown() { document.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', keyCode:27, bubbles:true })); await this.wait(300); }
 
             async getAllResumes() {
@@ -187,33 +176,18 @@
 
             async selectBestResume(vt) {
                 if (!this.settings.autoSelectResume || !vt) return false;
-                const op = await this.openResumeDropdown();
-                if (!op) return false;
-                await this.wait(500);
-                const rs = await this.getAllResumes();
+                const op = await this.openResumeDropdown(); if (!op) return false;
+                await this.wait(500); const rs = await this.getAllResumes();
                 if (rs.length <= 1) { await this.closeResumeDropdown(); return false; }
-                let best = null, bs = 0;
-                const vl = vt.toLowerCase();
+                let best = null, bs = 0; const vl = vt.toLowerCase();
                 for (const r of rs) {
-                    if (r.isSelected) continue;
-                    const tl = r.title.toLowerCase();
-                    let s = 0;
-                    if (tl === vl) s = 100;
-                    else if (vl.includes(tl)) s = 95;
-                    else if (tl.includes(vl)) s = 90;
-                    else {
-                        const sw = ['прием','отправка','тмц','работа','сотрудник','специалист','помощник','и','с','по','на','в','для'];
-                        const vw = vl.split(/[\s,()\-/]+/).filter(w => w.length > 2 && !sw.includes(w));
-                        const rw = tl.split(/[\s,()\-/]+/).filter(w => w.length > 2 && !sw.includes(w));
-                        let m = 0;
-                        for (const v of vw) { for (const r of rw) { if (v === r || r.includes(v) || v.includes(r)) { m++; break; } } }
-                        if (vw.length > 0) s = (m / vw.length) * 100;
-                    }
+                    if (r.isSelected) continue; const tl = r.title.toLowerCase(); let s = 0;
+                    if (tl === vl) s = 100; else if (vl.includes(tl)) s = 95; else if (tl.includes(vl)) s = 90;
+                    else { const sw = ['прием','отправка','тмц','работа','сотрудник','специалист','помощник','и','с','по','на','в','для']; const vw = vl.split(/[\s,()\-/]+/).filter(w => w.length > 2 && !sw.includes(w)); const rw = tl.split(/[\s,()\-/]+/).filter(w => w.length > 2 && !sw.includes(w)); let m = 0; for (const v of vw) { for (const rr of rw) { if (v === rr || rr.includes(v) || v.includes(rr)) { m++; break; } } } if (vw.length > 0) s = (m / vw.length) * 100; }
                     if (s > bs) { bs = s; best = r; }
                 }
                 if (best && bs >= this.settings.resumeTitleMatching) { best.element.click(); await this.wait(500); }
-                await this.closeResumeDropdown();
-                return best && bs >= this.settings.resumeTitleMatching;
+                await this.closeResumeDropdown(); return best && bs >= this.settings.resumeTitleMatching;
             }
 
             async processResponse(o, depth = 0) {
@@ -225,45 +199,46 @@
                     if (this.settings.autoSelectResume && !this.resumeSelectedFlag) { const vt = this.getVacancyTitleFromModal(); if (vt) { await this.selectBestResume(vt); this.resumeSelectedFlag = true; await this.wait(500); } }
                     const ta = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
                     if (ta) {
-                        if (!this.settings.skipCoverLetter) {
-                            const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-                            if (ns) { ns.call(ta, this.coverLetter); ta.dispatchEvent(new Event('input', { bubbles:true })); }
-                            else { ta.value = this.coverLetter; ta.dispatchEvent(new Event('input', { bubbles:true })); }
-                            await this.wait(500);
-                        }
+                        if (!this.settings.skipCoverLetter) { const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; if (ns) { ns.call(ta, this.coverLetter); ta.dispatchEvent(new Event('input', { bubbles:true })); } else { ta.value = this.coverLetter; ta.dispatchEvent(new Event('input', { bubbles:true })); } await this.wait(500); }
                         const r = await this.submitResponse();
                         if (r && this.isLimitReached()) { this.updateStatus('🛑 Достигнут лимит 200 откликов за 24 часа.\nОстановка.'); this.stopAutoProcess(); return false; }
                         return r;
                     }
-                    const al = document.querySelector('[data-qa="add-cover-letter"]');
-                    if (al && !this.settings.skipCoverLetter) { al.click(); await this.wait(800); return await this.processResponse(o, depth + 1); }
-                    const rl = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться'));
-                    if (rl) { rl.click(); await this.wait(800); return await this.processResponse(o, depth + 1); }
+                    const al = document.querySelector('[data-qa="add-cover-letter"]'); if (al && !this.settings.skipCoverLetter) { al.click(); await this.wait(800); return await this.processResponse(o, depth + 1); }
+                    const rl = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться')); if (rl) { rl.click(); await this.wait(800); return await this.processResponse(o, depth + 1); }
                     return await this.submitResponse();
                 } catch(e) { this.stats.failed++; this.updateStatsDisplay(); await this.closeModal(); return false; }
             }
 
-            async submitResponse() {
-                const sb = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])') || document.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                if (!sb) return false;
-                if (sb.hasAttribute('disabled')) await this.wait(1000);
-                sb.click(); await this.wait(2000);
-                if (this.isLimitReached()) return false;
-                return true;
-            }
-
+            async submitResponse() { const sb = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])') || document.querySelector('[data-qa="vacancy-response-submit-popup"]'); if (!sb) return false; if (sb.hasAttribute('disabled')) await this.wait(1000); sb.click(); await this.wait(2000); if (this.isLimitReached()) return false; return true; }
             async closeModal() { const b = document.querySelector('[data-qa="vacancy-response-popup-close"]') || document.querySelector('[aria-label="Закрыть"]'); if (b) { b.click(); await this.wait(300); } }
 
             updateStatus(m) { const el = document.getElementById('hh-status'); if (el) { el.textContent = m; el.style.whiteSpace = 'pre-line'; el.style.fontSize = m.length > 50 ? '11px' : '13px'; } }
-
             updateStatsDisplay() { const el = document.getElementById('hh-stats'); if (el) el.textContent = '✅'+this.stats.success+' ❌'+this.stats.failed+' ⏭️'+this.stats.skipped; this.saveSettings(); }
-
             updateCount() { const el = document.getElementById('hh-count'); if (el) el.textContent = this.getAvailableButtons().length; }
 
             updateControlButtons() {
                 const s = document.getElementById('hh-start'), t = document.getElementById('hh-test'), p = document.getElementById('hh-stop');
-                if (this.isRunning) { if (s) s.style.display = 'none'; if (t) t.style.display = 'none'; if (p) p.style.display = 'block'; this.toggleButton.style.background = 'linear-gradient(135deg,#f44336,#d32f2f)'; this.toggleButton.textContent = '⏹️'; }
-                else { const d = this.theme === 'dark'; if (s) s.style.display = 'block'; if (t) t.style.display = 'block'; if (p) p.style.display = 'none'; this.toggleButton.style.background = d ? 'linear-gradient(135deg,#333,#555)' : 'linear-gradient(135deg,#2196F3,#1976D2)'; this.toggleButton.textContent = '🚀'; }
+                
+                if (this.isRunning) {
+                    if (s) s.style.display = 'none';
+                    if (t) t.style.display = 'none';
+                    if (p) p.style.display = 'block';
+                    if (this.toggleButton) {
+                        this.toggleButton.classList.add('hh-toggle-running');
+                        this.toggleButton.classList.remove('hh-toggle-stopped');
+                        this.toggleButton.textContent = '⏹️';
+                    }
+                } else {
+                    if (s) s.style.display = 'block';
+                    if (t) t.style.display = 'block';
+                    if (p) p.style.display = 'none';
+                    if (this.toggleButton) {
+                        this.toggleButton.classList.add('hh-toggle-stopped');
+                        this.toggleButton.classList.remove('hh-toggle-running');
+                        this.toggleButton.textContent = '🚀';
+                    }
+                }
             }
 
             getAvailableButtons() {
@@ -275,39 +250,25 @@
                 });
             }
 
-            isAlreadyRespondedVacancy(b) {
-                if (!this.settings.skipResponded) return false;
-                const p = b.closest('.vacancy-serp-item') || b.closest('.serp-item') || b.closest('[data-qa="vacancy-serp__vacancy"]');
-                if (!p) return false;
-                if (p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]')) return true;
-                const pt = p.innerText || p.textContent || '';
-                if (pt.includes('Вы откликнулись') || pt.includes('Вы уже откликнулись') || pt.includes('Отклик отправлен')) return true;
-                const bt = b.innerText || b.textContent || '';
-                return !bt.includes('Откликнуться') && bt.trim() !== '';
-            }
-
+            isAlreadyRespondedVacancy(b) { if (!this.settings.skipResponded) return false; const p = b.closest('.vacancy-serp-item') || b.closest('.serp-item') || b.closest('[data-qa="vacancy-serp__vacancy"]'); if (!p) return false; if (p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]')) return true; const pt = p.innerText || p.textContent || ''; if (pt.includes('Вы откликнулись') || pt.includes('Вы уже откликнулись') || pt.includes('Отклик отправлен')) return true; const bt = b.innerText || b.textContent || ''; return !bt.includes('Откликнуться') && bt.trim() !== ''; }
             async safeClick(b) { try { b.scrollIntoView({ behavior:'smooth', block:'center' }); await this.wait(300); b.click(); await this.wait(500); return true; } catch(e) { return false; } }
 
             async processSingleVacancy(b, i, t) {
                 if (!this.isRunning) return false;
                 const lc = this.isLimitReached();
                 if (lc) { this.updateStatus((lc === 'limit_exceeded' || lc === 'limit_exceeded_text') ? '🛑 Достигнут лимит 200 откликов за 24 часа.\nОстановка.' : '🛑 Обнаружена ошибка.\nУспешно: ' + this.stats.success + '\nОстановка.'); this.stopAutoProcess(); return false; }
-                this.resumeSelectedFlag = false;
-                const o = this.getOrganizationNameFromCard(b);
+                this.resumeSelectedFlag = false; const o = this.getOrganizationNameFromCard(b);
                 this.updateStatus('🎯 ' + (i+1) + '/' + t + ': ' + (o || 'Обработка...'));
                 if (!(await this.safeClick(b))) { this.stats.failed++; this.consecutiveErrors++; this.updateStatsDisplay(); return false; }
                 const ok = await this.processResponse(o);
                 if (ok) { this.consecutiveErrors = 0; if (o && this.settings.autoRememberOrganizations) this.addToAutoFilter(o); this.stats.success++; this.updateStatsDisplay(); await this.closeModal(); return true; }
                 else { this.consecutiveErrors++; this.stats.failed++; this.updateStatsDisplay();
-                    const lc2 = this.isLimitReached();
-                    if (lc2) { this.updateStatus((lc2 === 'limit_exceeded' || lc2 === 'limit_exceeded_text') ? '🛑 Достигнут лимит 200 откликов за 24 часа.\nОстановка.' : '🛑 Обнаружена ошибка.\nУспешно: ' + this.stats.success + '\nОстановка.'); this.stopAutoProcess(); }
-                    await this.closeModal(); return false;
-                }
+                    const lc2 = this.isLimitReached(); if (lc2) { this.updateStatus((lc2 === 'limit_exceeded' || lc2 === 'limit_exceeded_text') ? '🛑 Достигнут лимит 200 откликов за 24 часа.\nОстановка.' : '🛑 Обнаружена ошибка.\nУспешно: ' + this.stats.success + '\nОстановка.'); this.stopAutoProcess(); }
+                    await this.closeModal(); return false; }
             }
 
             async startAutoProcess() {
-                if (this.isRunning) return;
-                this.isRunning = true; this.updateControlButtons(); this.updateStatus('🚀 Запуск...');
+                if (this.isRunning) return; this.isRunning = true; this.updateControlButtons(); this.updateStatus('🚀 Запуск...');
                 try {
                     while (this.isRunning) {
                         const bt = this.getAvailableButtons();
@@ -315,24 +276,19 @@
                         for (let i = 0; i < bt.length && this.isRunning; i++) { await this.processSingleVacancy(bt[i], i, bt.length); if (i < bt.length-1 && this.isRunning) await this.wait(this.settings.delay*1000); }
                         await this.wait(800);
                     }
-                } catch(e) { console.error(e); }
-                this.stopAutoProcess();
+                } catch(e) { console.error(e); } this.stopAutoProcess();
             }
 
             stopAutoProcess() { this.isRunning = false; this.updateControlButtons(); }
-
             async testProcess() { const bt = this.getAvailableButtons(); if (!bt.length) return; this.isRunning = true; await this.processSingleVacancy(bt[0], 0, 1); this.isRunning = false; this.updateControlButtons(); this.updateStatus('✅ Тест завершён'); }
 
             testFilter() {
-                const bt = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-                let r = '🔍 ТЕСТ ФИЛЬТРА:\n\n', f = 0;
+                const bt = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]'); let r = '🔍 ТЕСТ ФИЛЬТРА:\n\n', f = 0;
                 bt.forEach((b, i) => { const o = this.getOrganizationNameFromCard(b); if (this.isFilteredOrganization(b)) f++; r += (i+1) + '. ' + (o||'???') + ' - ' + (this.isFilteredOrganization(b)?'🚫 ЗАБЛОКИРОВАНА':'✅ РАЗРЕШЕНА') + '\n'; });
-                r += '\n📊 ИТОГО: ' + f + ' из ' + bt.length + ' вакансий заблокировано фильтром';
-                this.updateStatus(r);
+                r += '\n📊 ИТОГО: ' + f + ' из ' + bt.length + ' вакансий заблокировано фильтром'; this.updateStatus(r);
             }
 
             analyzePage() { const a = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]').length; this.updateStatus('📊 АНАЛИЗ:\nВсего: '+a+'\nДоступно: '+this.getAvailableButtons().length+'\nУспешно: '+this.stats.success+'\nОшибок: '+this.stats.failed+'\nПропущено: '+this.stats.skipped); }
-
             clearHistory() { this.processedVacancies.clear(); this.stats = { success:0, failed:0, skipped:0, total:0 }; this.consecutiveErrors = 0; this.updateStatsDisplay(); this.updateStatus('🗑️ Статистика очищена'); }
         }
 
