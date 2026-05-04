@@ -1,6 +1,35 @@
-// ===== HH AUTO RESPONDER v2.0 — CORE PROTECTION =====
+// ===== CORE.JS — CORE PROTECTION + UNKILLABLE BOT =====
 (function() {
     'use strict';
+
+    // 🔴 Глобальное хранилище бота (переживает SPA-переходы)
+    window.__hh_bot_instance__ = null;
+
+    // 🔴 Автовосстановление бота при SPA-переходах
+    const origPushState = history.pushState;
+    history.pushState = function(...args) {
+        const result = origPushState.apply(this, args);
+        setTimeout(tryRestoreBot, 1000);
+        return result;
+    };
+    
+    const origReplaceState = history.replaceState;
+    history.replaceState = function(...args) {
+        const result = origReplaceState.apply(this, args);
+        setTimeout(tryRestoreBot, 1000);
+        return result;
+    };
+    
+    window.addEventListener('popstate', () => {
+        setTimeout(tryRestoreBot, 1000);
+    });
+    
+    function tryRestoreBot() {
+        if (!window.hhAutoResponder && window.__hh_bot_instance__) {
+            window.hhAutoResponder = window.__hh_bot_instance__;
+            console.log('🔄 Бот восстановлен после SPA-перехода');
+        }
+    }
 
     // ===== ТИХОЕ ПОДАВЛЕНИЕ ОШИБОК =====
     (function() {

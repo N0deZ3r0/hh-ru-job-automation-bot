@@ -1,15 +1,16 @@
-// ===== HH AUTO RESPONDER v2.0 — IFRAME TEST DETECTOR =====
+// ===== HH AUTO RESPONDER v2.1 — UNKILLABLE =====
 (function() {
     'use strict';
 
     if (!window.location.href.includes('hh.ru')) return;
 
-    // 🔴 БЛОК 1: ТРОЙНОЙ ДЕТЕКТОР ТЕСТА (на случай прямого перехода)
+    // 🔴 БЛОК 1: ТРОЙНОЙ ДЕТЕКТОР ТЕСТА
     (function() {
         function isTestPage() {
             if (window.location.href.includes('startedWithQuestion=false')) return true;
             if (document.querySelector('input[name="testRequired"]')?.value === 'true') return true;
             if (document.querySelector('[data-qa="test-description"]')) return true;
+            if (document.querySelector('[data-qa="employer-asking-for-test"]')) return true;
             return false;
         }
         
@@ -45,7 +46,6 @@
         }
         
         if (isTestPage()) { escapeFromTest(); return; }
-        
         setTimeout(() => { if (isTestPage()) escapeFromTest(); }, 500);
         
         const observer = new MutationObserver(() => {
@@ -59,7 +59,6 @@
                 observer.observe(document.body, { childList: true, subtree: true });
             });
         }
-        
         setTimeout(() => observer.disconnect(), 10000);
     })();
 
@@ -70,8 +69,16 @@
         });
     }
 
+    // 🔴 Функция восстановления бота
+    function tryRestoreBot() {
+        if (!window.hhAutoResponder && window.__hh_bot_instance__) {
+            window.hhAutoResponder = window.__hh_bot_instance__;
+            console.log('🔄 Бот восстановлен');
+        }
+    }
+
     waitForCore().then(() => {
-        console.log('=== HH Авто-отклик v2.1 [IFrame] ===');
+        console.log('=== HH Авто-отклик v2.1 [Unkillable] ===');
 
         class HHAutoResponder {
             constructor() {
@@ -91,10 +98,12 @@
                 this.currentVacancyId = null;
 
                 window.hhAutoResponder = this;
+                window.__hh_bot_instance__ = this;
                 this.init();
             }
 
             init() {
+                tryRestoreBot();
                 this.loadSettings();
                 this.loadSkipped();
                 this.loadTestEmployers();
@@ -102,7 +111,7 @@
                 this.setupEventListeners();
                 if (this.settings.resumeTitleMatching > 80) { this.settings.resumeTitleMatching = 70; this.saveSettings(); }
                 const W = window.__HH_WASM__;
-                this.updateStatus('✅ Готов [IFrame]' + (W ? ' [WASM]' : ' [JS]'));
+                this.updateStatus('✅ Готов [Unkillable]' + (W ? ' [WASM]' : ' [JS]'));
             }
 
             loadTestEmployers() {
@@ -125,16 +134,6 @@
                 try { localStorage.setItem('hh-skipped-vacancies', JSON.stringify([...this.skippedVacancies])); } catch(e) {}
             }
 
-            // Проверка кнопки на тест (по employerId и skipped)
-            isTestVacancy(b) {
-                const href = b.href || b.getAttribute('href') || '';
-                const empMatch = href.match(/employerId=(\d+)/);
-                if (empMatch && this.testEmployerIds.has(empMatch[1])) return true;
-                const vid = this.getVacancyId(b);
-                if (vid && this.skippedVacancies.has('id_' + vid)) return true;
-                return false;
-            }
-
             getVacancyId(b) {
                 if (b.href) {
                     let match = b.href.match(/vacancyId=(\d+)/);
@@ -151,8 +150,17 @@
                 return null;
             }
 
-            // 🔴 ПРОВЕРКА ТЕСТА ЧЕРЕЗ СКРЫТЫЙ IFRAME
+            isTestVacancy(b) {
+                const href = b.href || b.getAttribute('href') || '';
+                const empMatch = href.match(/employerId=(\d+)/);
+                if (empMatch && this.testEmployerIds.has(empMatch[1])) return true;
+                const vid = this.getVacancyId(b);
+                if (vid && this.skippedVacancies.has('id_' + vid)) return true;
+                return false;
+            }
+
             async checkTestViaIframe(vacancyId, employerId, organizationName) {
+                const self = this;
                 return new Promise((resolve) => {
                     const iframe = document.createElement('iframe');
                     iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
@@ -160,85 +168,63 @@
                     
                     let resolved = false;
                     
-                    iframe.onload = () => {
+                    const checkDoc = () => {
                         if (resolved) return;
-                        
                         try {
-                            const doc = iframe.contentDocument || iframe.contentWindow.document;
+                            const d = iframe.contentDocument || iframe.contentWindow?.document;
+                            if (!d) return;
                             
-                            let attempts = 0;
-                            const checkInterval = setInterval(() => {
-                                attempts++;
+                            if (d.querySelector('[data-qa="test-description"]') ||
+                                d.querySelector('[data-qa="employer-asking-for-test"]') ||
+                                d.querySelector('input[name="testRequired"]')?.value === 'true' ||
+                                d.location?.href?.includes('startedWithQuestion=false')) {
                                 
-                                // 🔴 ТРИ ПРИЗНАКА ТЕСТА
-                                const urlHasTest = doc.location?.href?.includes('startedWithQuestion=false');
-                                const hasTestField = doc.querySelector('input[name="testRequired"]')?.value === 'true';
-                                const hasTestDescription = !!doc.querySelector('[data-qa="test-description"]');
+                                resolved = true;
+                                clearInterval(interval);
+                                console.log('🧪 ТЕСТ:', organizationName);
                                 
-                                if (urlHasTest || hasTestField || hasTestDescription) {
-                                    clearInterval(checkInterval);
-                                    console.log('🧪 ТЕСТ:', organizationName);
-                                    
-                                    // Сохраняем ID и employerId
-                                    this.addSkippedVacancy('id_' + vacancyId);
-                                    if (employerId) {
-                                        this.testEmployerIds.add(String(employerId));
-                                        try { localStorage.setItem('hh-test-employers', JSON.stringify([...this.testEmployerIds])); } catch(e) {}
-                                    }
-                                    if (organizationName && this.settings.autoRememberOrganizations) {
-                                        this.addToAutoFilter(organizationName);
-                                    }
-                                    this.stats.skipped++;
-                                    this.updateStatsDisplay();
-                                    
-                                    iframe.remove();
-                                    resolved = true;
-                                    resolve({ isTest: true });
-                                    return;
+                                self.addSkippedVacancy('id_' + vacancyId);
+                                if (employerId) {
+                                    self.testEmployerIds.add(String(employerId));
+                                    try { localStorage.setItem('hh-test-employers', JSON.stringify([...self.testEmployerIds])); } catch(e) {}
                                 }
-                                
-                                // 🔴 Если появилась кнопка отправки — это НЕ тест
-                                const submitBtn = doc.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                                if (submitBtn && submitBtn.offsetParent && !submitBtn.hasAttribute('disabled')) {
-                                    clearInterval(checkInterval);
-                                    iframe.remove();
-                                    resolved = true;
-                                    resolve({ isTest: false });
-                                    return;
+                                if (organizationName && self.settings.autoRememberOrganizations) {
+                                    self.addToAutoFilter(organizationName);
                                 }
+                                self.stats.skipped++;
+                                self.updateStatsDisplay();
                                 
-                                if (attempts > 40) {
-                                    clearInterval(checkInterval);
-                                    iframe.remove();
-                                    resolved = true;
-                                    resolve({ isTest: false, timeout: true });
-                                }
-                            }, 500);
+                                iframe.remove();
+                                resolve({ isTest: true });
+                                return;
+                            }
                             
-                        } catch(e) {
-                            iframe.remove();
-                            resolved = true;
-                            resolve({ isTest: false, error: e.message });
-                        }
+                            const submitBtn = d.querySelector('[data-qa="vacancy-response-submit-popup"]');
+                            if (submitBtn && submitBtn.offsetParent && !submitBtn.hasAttribute('disabled')) {
+                                resolved = true;
+                                clearInterval(interval);
+                                iframe.remove();
+                                resolve({ isTest: false });
+                                return;
+                            }
+                        } catch(e) {}
                     };
                     
-                    iframe.onerror = () => {
-                        if (!resolved) {
-                            iframe.remove();
-                            resolved = true;
-                            resolve({ isTest: false, error: 'iframe_error' });
+                    let attempts = 0;
+                    const interval = setInterval(() => {
+                        attempts++;
+                        checkDoc();
+                        if (attempts > 40 || resolved) {
+                            clearInterval(interval);
+                            if (!resolved) {
+                                iframe.remove();
+                                resolved = true;
+                                resolve({ isTest: false, timeout: true });
+                            }
                         }
-                    };
+                    }, 300);
                     
                     document.body.appendChild(iframe);
-                    
-                    setTimeout(() => {
-                        if (!resolved) {
-                            iframe.remove();
-                            resolved = true;
-                            resolve({ isTest: false, timeout: true });
-                        }
-                    }, 20000);
                 });
             }
 
@@ -291,7 +277,14 @@
                 $('hh-close-btn').addEventListener('click', () => { this.panel.style.display = 'none'; });
                 $('hh-settings-header')?.addEventListener('click', () => this.toggleSettings());
                 $('hh-theme-slider')?.addEventListener('click', () => { this.toggleTheme(); this.createInterface(); this.setupEventListeners(); });
-                $('hh-start').addEventListener('click', () => this.startAutoProcess());
+                
+                // 🔴 Кнопка Старт с автовосстановлением
+                $('hh-start').addEventListener('click', () => {
+                    tryRestoreBot();
+                    const bot = window.hhAutoResponder || this;
+                    bot.startAutoProcess();
+                });
+                
                 $('hh-test').addEventListener('click', () => this.testProcess());
                 $('hh-stop').addEventListener('click', () => this.stopAutoProcess());
                 $('hh-analyze').addEventListener('click', () => this.analyzePage());
@@ -428,6 +421,7 @@
             }
 
             getAvailableButtons() {
+                tryRestoreBot();
                 if (window.location.href.includes('/applicant/vacancy_response')) return [];
                 return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
                     if (!b.offsetParent || b.style.display === 'none') return false;
@@ -440,110 +434,120 @@
 
             async safeClick(b) { try { b.scrollIntoView({ behavior:'smooth', block:'center' }); await this.wait(300); b.click(); await this.wait(500); return true; } catch(e) { return false; } }
 
-            // 🔴 ОСНОВНОЙ МЕТОД С IFRAME-ПРОВЕРКОЙ
             async processSingleVacancy(b, i, t) {
-                if (!this.isRunning) return false;
+                tryRestoreBot();
+                const bot = window.hhAutoResponder || this;
+                if (!bot.isRunning) return false;
                 
-                const lc = this.isLimitReached();
-                if (lc) { this.updateStatus('🛑 Лимит. Остановка.'); this.stopAutoProcess(); return false; }
+                const lc = bot.isLimitReached();
+                if (lc) { bot.updateStatus('🛑 Лимит. Остановка.'); bot.stopAutoProcess(); return false; }
                 
-                const o = this.getOrganizationNameFromCard(b);
-                const vacancyId = this.getVacancyId(b);
+                const o = bot.getOrganizationNameFromCard(b);
+                const vacancyId = bot.getVacancyId(b);
                 const href = b.href || '';
                 const empMatch = href.match(/employerId=(\d+)/);
                 const employerId = empMatch ? empMatch[1] : '';
                 
-                if (vacancyId && this.skippedVacancies.has('id_' + vacancyId)) {
-                    return false;
+                if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return false;
+                
+                if (vacancyId && employerId) {
+                    bot.updateStatus('🔍 ' + (i+1) + '/' + t + ': проверка ' + (o || '...'));
+                    const checkResult = await bot.checkTestViaIframe(vacancyId, employerId, o);
+                    if (checkResult.isTest) return false;
                 }
                 
-                this.updateStatus('🔍 ' + (i+1) + '/' + t + ': проверка ' + (o || '...'));
+                await bot.wait(800);
+                bot.updateStatus('🎯 ' + (i+1) + '/' + t + ': ' + (o || 'Обработка...'));
                 
-                // 🔴 ПРОВЕРКА ТЕСТА ЧЕРЕЗ IFRAME (без ухода со страницы!)
-                if (vacancyId && employerId) {
-                    const checkResult = await this.checkTestViaIframe(vacancyId, employerId, o);
-                    
-                    if (checkResult.isTest) {
-                        return false; // Тест — пропускаем
+                // Ищем свежую кнопку
+                let targetBtn = b;
+                if (!b.offsetParent) {
+                    targetBtn = document.querySelector(`[data-qa="vacancy-serp__vacancy_response"][href*="${vacancyId}"]`);
+                    if (!targetBtn?.offsetParent) {
+                        bot.stats.skipped++;
+                        bot.updateStatsDisplay();
+                        return false;
                     }
                 }
                 
-                // Обычный клик
-                this.updateStatus('🎯 ' + (i+1) + '/' + t + ': ' + (o || 'Обработка...'));
-                
-                if (!(await this.safeClick(b))) { 
-                    this.stats.failed++; this.consecutiveErrors++; 
-                    this.updateStatsDisplay(); return false; 
+                if (!(await bot.safeClick(targetBtn))) { 
+                    bot.stats.failed++; bot.consecutiveErrors++; 
+                    bot.updateStatsDisplay(); return false; 
                 }
                 
-                await this.wait(1500);
-                
-                const ok = await this.processResponse(o);
+                await bot.wait(1500);
+                const ok = await bot.processResponse(o);
                 
                 if (ok) { 
-                    this.consecutiveErrors = 0; 
-                    if (o && this.settings.autoRememberOrganizations) this.addToAutoFilter(o); 
-                    this.stats.success++; this.updateStatsDisplay(); 
+                    bot.consecutiveErrors = 0; 
+                    if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o); 
+                    bot.stats.success++; bot.updateStatsDisplay(); 
                 } else { 
-                    this.consecutiveErrors++; this.stats.failed++; 
-                    this.updateStatsDisplay();
+                    bot.consecutiveErrors++; bot.stats.failed++; 
+                    bot.updateStatsDisplay();
                 }
                 
-                await this.closeModal();
-                
+                await bot.closeModal();
                 if (window.location.href.includes('/applicant/vacancy_response')) {
                     window.history.back();
                 }
-                
                 return ok;
             }
 
             async startAutoProcess() {
-                if (this.isRunning) return; 
-                this.isRunning = true; 
-                this.updateControlButtons(); 
-                this.updateStatus('🚀 Запуск...');
+                tryRestoreBot();
+                const bot = window.hhAutoResponder || this;
+                if (bot.isRunning) return;
+                if (window.location.href.includes('/applicant/vacancy_response')) {
+                    bot.updateStatus('⚠️ Перейдите на страницу поиска');
+                    return;
+                }
+                
+                bot.isRunning = true; 
+                bot.updateControlButtons(); 
+                bot.updateStatus('🚀 Запуск [Unkillable]...');
                 
                 try {
-                    while (this.isRunning) {
-                        await this.wait(1000);
-                        
-                        const bt = this.getAvailableButtons();
+                    while (bot.isRunning) {
+                        await bot.wait(1000);
+                        const bt = bot.getAvailableButtons();
                         
                         if (!bt.length) { 
-                            this.updateStatus('✅ Все обработаны'); 
-                            if (this.settings.autoNextPage) { 
+                            bot.updateStatus('✅ Все обработаны'); 
+                            if (bot.settings.autoNextPage) { 
                                 const n = document.querySelector('[data-qa="pager-next"]'); 
                                 if (n) { 
-                                    this.updateStatus('➡️ След. страница...'); 
+                                    bot.updateStatus('➡️ След. страница...'); 
                                     n.click(); 
-                                    await this.wait(3000); 
+                                    await bot.wait(3000); 
                                     continue; 
                                 } 
                             } 
-                            this.updateStatus('🎉 Завершено!\n✅'+this.stats.success+' ❌'+this.stats.failed+' ⏭️'+this.stats.skipped); 
+                            bot.updateStatus('🎉 Завершено!\n✅'+bot.stats.success+' ❌'+bot.stats.failed+' ⏭️'+bot.stats.skipped); 
                             break; 
                         }
                         
-                        for (let i = 0; i < bt.length && this.isRunning; i++) { 
-                            await this.processSingleVacancy(bt[i], i, bt.length); 
-                            if (i < bt.length-1 && this.isRunning) await this.wait(this.settings.delay*1000); 
+                        for (let i = 0; i < bt.length && bot.isRunning; i++) { 
+                            await bot.processSingleVacancy(bt[i], i, bt.length); 
+                            if (i < bt.length-1 && bot.isRunning) await bot.wait(bot.settings.delay*1000); 
                         }
-                        await this.wait(800);
+                        await bot.wait(800);
                     }
                 } catch(e) { console.error(e); } 
-                this.stopAutoProcess();
+                bot.stopAutoProcess();
             }
 
-            stopAutoProcess() { this.isRunning = false; this.updateControlButtons(); }
+            stopAutoProcess() { tryRestoreBot(); const bot = window.hhAutoResponder || this; bot.isRunning = false; bot.updateControlButtons(); }
             
             async testProcess() { 
-                const bt = this.getAvailableButtons(); 
+                tryRestoreBot();
+                const bot = window.hhAutoResponder || this;
+                const bt = bot.getAvailableButtons(); 
                 if (!bt.length) return; 
-                this.isRunning = true; this.updateControlButtons();
-                await this.processSingleVacancy(bt[0], 0, 1); 
-                this.isRunning = false; this.updateControlButtons(); 
-                this.updateStatus('✅ Тест завершён'); 
+                bot.isRunning = true; bot.updateControlButtons();
+                await bot.processSingleVacancy(bt[0], 0, 1); 
+                bot.isRunning = false; bot.updateControlButtons(); 
+                bot.updateStatus('✅ Тест завершён'); 
             }
 
             testFilter() {
@@ -575,7 +579,7 @@
             }
         }
 
-        try { chrome.runtime.onMessage.addListener((r,s,res) => { if (r.action === 'checkConnection') res({connected:!!window.hhAutoResponder}); return true; }); } catch(e) {}
+        try { chrome.runtime.onMessage.addListener((r,s,res) => { if (r.action === 'checkConnection') res({connected:!!window.hhAutoResponder || !!window.__hh_bot_instance__}); return true; }); } catch(e) {}
 
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(() => new HHAutoResponder(), 800));
         else setTimeout(() => new HHAutoResponder(), 800);
