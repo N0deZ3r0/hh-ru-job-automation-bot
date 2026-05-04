@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HH Авто-отклик Pro",
-  "version": "2.0.0",
+  "version": "2.1",
   "description": "Авто-отклик HH.ru с максимальной WASM защитой",
   "permissions": [
     "activeTab",

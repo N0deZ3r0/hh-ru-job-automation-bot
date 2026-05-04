@@ -36,7 +36,7 @@
                 WebkitBackdropFilter: 'blur(12px)',
                 color: tc, 
                 border: `2px solid ${bc}`,
-                borderRadius:'16px', padding:'20px', width:'390px', minWidth:'390px', maxWidth:'390px',
+                borderRadius:'16px', padding:'20px', width:'385px', minWidth:'385px', maxWidth:'385px',
                 boxShadow: isDark 
                     ? `0 8px 40px rgba(0,0,0,0.5), 0 0 60px ${violetGlow}20, 0 0 1px rgba(255,255,255,0.1)` 
                     : `0 8px 32px rgba(0,0,0,0.08), 0 0 40px rgba(124,58,237,0.05), 0 0 1px rgba(0,0,0,0.05)`,
@@ -49,10 +49,57 @@
 
             d.innerHTML = `
                 <style>
-                    #hh-auto-panel::-webkit-scrollbar { width: 4px; height: 4px; }
-                    #hh-auto-panel::-webkit-scrollbar-track { background: transparent; border-radius: 2px; }
-                    #hh-auto-panel::-webkit-scrollbar-thumb { background: ${isDark ? 'rgba(167,139,250,0.3)' : 'rgba(124,58,237,0.2)'}; border-radius: 4px; min-height: 20px; max-height: 40px; }
-                    #hh-auto-panel::-webkit-scrollbar-thumb:hover { background: ${isDark ? 'rgba(167,139,250,0.5)' : 'rgba(124,58,237,0.35)'}; }
+                    /* ===== ОБЩИЙ СКРОЛЛБАР ДЛЯ ПАНЕЛИ ===== */
+                    #hh-auto-panel {
+                        scrollbar-width: thin;
+                        scrollbar-color: ${isDark ? 'rgba(167,139,250,0.3)' : 'rgba(124,58,237,0.2)'} transparent;
+                    }
+                    #hh-auto-panel::-webkit-scrollbar { 
+                        width: 6px; 
+                        height: 6px; 
+                    }
+                    #hh-auto-panel::-webkit-scrollbar-track { 
+                        background: transparent; 
+                        border-radius: 3px; 
+                    }
+                    #hh-auto-panel::-webkit-scrollbar-thumb { 
+                        background: ${isDark ? 'rgba(167,139,250,0.3)' : 'rgba(124,58,237,0.2)'}; 
+                        border-radius: 3px; 
+                        min-height: 30px;
+                        border: 1px solid transparent;
+                        background-clip: padding-box;
+                    }
+                    #hh-auto-panel::-webkit-scrollbar-thumb:hover { 
+                        background: ${isDark ? 'rgba(167,139,250,0.5)' : 'rgba(124,58,237,0.35)'}; 
+                        border: 1px solid transparent;
+                        background-clip: padding-box;
+                    }
+                    
+                    /* ===== СКРОЛЛБАР ДЛЯ ТЕКСТОВЫХ ПОЛЕЙ ===== */
+                    #hh-auto-panel textarea {
+                        scrollbar-width: thin;
+                        scrollbar-color: ${isDark ? 'rgba(167,139,250,0.3)' : 'rgba(124,58,237,0.2)'} transparent;
+                    }
+                    #hh-auto-panel textarea::-webkit-scrollbar { 
+                        width: 6px; 
+                        height: 6px; 
+                    }
+                    #hh-auto-panel textarea::-webkit-scrollbar-track { 
+                        background: transparent; 
+                        border-radius: 3px; 
+                    }
+                    #hh-auto-panel textarea::-webkit-scrollbar-thumb { 
+                        background: ${isDark ? 'rgba(167,139,250,0.3)' : 'rgba(124,58,237,0.2)'}; 
+                        border-radius: 3px; 
+                        min-height: 20px;
+                        border: 1px solid transparent;
+                        background-clip: padding-box;
+                    }
+                    #hh-auto-panel textarea::-webkit-scrollbar-thumb:hover { 
+                        background: ${isDark ? 'rgba(167,139,250,0.5)' : 'rgba(124,58,237,0.35)'}; 
+                        border: 1px solid transparent;
+                        background-clip: padding-box;
+                    }
                     
                     .hh-btn {
                         border: none; cursor: pointer; font-weight: 600; font-size: 13px;
@@ -216,7 +263,7 @@
                     }
                 </style>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:nowrap;">
-                    <h3 style="margin:0;color:${isDark ? violet : violetDark};font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v2.0 ${W?'🛡️':''}</h3>
+                    <h3 style="margin:0;color:${isDark ? violet : violetDark};font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v2.1 ${W?'🛡️':''}</h3>
                     <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
                         <span style="font-size:10px;color:${violet};background:${isDark?'rgba(167,139,250,0.15)':'rgba(124,58,237,0.08)'};padding:3px 8px;border-radius:8px;font-weight:600;">${W?'WASM':'JS'}</span>
                         
@@ -283,7 +330,7 @@
                     <button id="hh-clear" class="hh-btn hh-btn-action">🗑️ Очистить</button>
                     <button id="hh-clear-auto-filter" class="hh-btn hh-btn-action" style="color:${isDark?'#f87171':'#ef4444'};">🧹 Автофильтр</button>
                 </div>
-                <div style="text-align:center;font-size:10px;color:${st};border-top:1px solid ${ib};padding-top:10px;margin-top:15px;">By ALEX 🛡️ Tech Guard | WASM ${W?'✅':'⚠️'} | v2.0</div>
+                <div style="text-align:center;font-size:10px;color:${st};border-top:1px solid ${ib};padding-top:10px;margin-top:15px;">By ALEX 🛡️ Tech Guard | WASM ${W?'✅':'⚠️'} | v2.1</div>
             `;
             return d;
         },
