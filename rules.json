@@ -1,0 +1,428 @@
+[
+  {
+    "id": 1,
+    "priority": 100,
+    "action": {
+      "type": "allow"
+    },
+    "condition": {
+      "urlFilter": "*://*.hh.ru/*",
+      "resourceTypes": [
+        "font",
+        "image",
+        "main_frame",
+        "media",
+        "other",
+        "script",
+        "stylesheet",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 100,
+    "action": {
+      "type": "allow"
+    },
+    "condition": {
+      "urlFilter": "*://hh.ru/*",
+      "resourceTypes": [
+        "font",
+        "image",
+        "main_frame",
+        "media",
+        "other",
+        "script",
+        "stylesheet",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 10,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.targetads.io/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 11,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.weborama.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 12,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.weborama.fr/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 13,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.weborama-tech.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 14,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.skcrtxr.com/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 15,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.hybrid.ai/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 18,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://*.appsflyer.com/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 19,
+    "priority": 101,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://cpa.hh.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 20,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://top-fwz1.mail.ru/*",
+      "resourceTypes": [
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 21,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://r3.mail.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 22,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://vk.com/rtrg*",
+      "resourceTypes": [
+        "script",
+        "xmlhttprequest",
+        "ping",
+        "image"
+      ]
+    }
+  },
+  {
+    "id": 23,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://mc.yandex.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 24,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://yandex.ru/ads/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 25,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://counter.yadro.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 26,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://cdn.uxfeedback.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 27,
+    "priority": 101,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://sentry.hh.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 28,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://sdk-api.apptracer.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 29,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://stats.vk-portal.net/*",
+      "resourceTypes": [
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 30,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://akashi.vk-portal.net/*",
+      "resourceTypes": [
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 31,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://www.tns-counter.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 32,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://ads.adfox.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 33,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://weborama.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "websocket",
+        "xmlhttprequest"
+      ]
+    }
+  },
+  {
+    "id": 34,
+    "priority": 1,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "urlFilter": "*://weborama.ru/*",
+      "resourceTypes": [
+        "image",
+        "ping",
+        "script",
+        "sub_frame",
+        "xmlhttprequest",
+        "websocket"
+      ]
+    }
+  }
+]
