@@ -66,6 +66,24 @@ async function initialize() {
             devicePixelRatio: 1,
             webglVendor: selectedGPU.webglVendor,
             webglRenderer: selectedGPU.webglRenderer,
+            // webglParams: реалистичные параметры для NVIDIA RTX-класса
+            // Ключи — значения WebGL-констант которые сайты проверяют чаще всего
+            webglParams: {
+                0x0D33: 16384,   // MAX_TEXTURE_SIZE
+                0x8B4D: 16,      // MAX_VERTEX_UNIFORM_VECTORS
+                0x8B49: 16,      // MAX_FRAGMENT_UNIFORM_VECTORS
+                0x8872: 16,      // MAX_TEXTURE_IMAGE_UNITS
+                0x8B4C: 16,      // MAX_VARYING_VECTORS
+                0x8869: 16,      // MAX_VERTEX_ATTRIBS
+                0x851C: 16384,   // MAX_CUBE_MAP_TEXTURE_SIZE
+                0x8B2A: 1024,    // MAX_VERTEX_UNIFORM_COMPONENTS (WebGL2)
+                0x8A2B: 1024,    // MAX_FRAGMENT_UNIFORM_COMPONENTS (WebGL2)
+                0x88FF: 8,       // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+                0x8073: 4096,    // MAX_RENDERBUFFER_SIZE
+                0x84E8: 16,      // MAX_COMBINED_TEXTURE_IMAGE_UNITS
+                0x0B45: 2,       // LINE_WIDTH range max
+                0x9111: 4,       // MAX_SAMPLES (WebGL2 MSAA)
+            },
             allowedFonts: [
                 'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
                 'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
@@ -105,6 +123,12 @@ async function initialize() {
             devicePixelRatio: 1,
             webglVendor: fallbackGPU.webglVendor,
             webglRenderer: fallbackGPU.webglRenderer,
+            webglParams: {
+                0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
+                0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
+                0x8A2B: 1024, 0x88FF: 8, 0x8073: 4096, 0x84E8: 16,
+                0x0B45: 2, 0x9111: 4,
+            },
             allowedFonts: [
                 // FIX: было [] — пустой список блокировал все шрифты, детектируемая аномалия
                 'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',

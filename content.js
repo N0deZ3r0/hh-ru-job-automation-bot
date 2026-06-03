@@ -4,7 +4,9 @@
 
     const _hn = window.location.hostname;
     if (_hn !== 'hh.ru' && !_hn.endsWith('.hh.ru')) return;
-    if (window.top !== window.self) return; // не работаем в iframe
+
+    // В iframe запускаем ТОЛЬКО детектор теста (Блок 1) — бот (Блоки 2-3) не нужен.
+    // hh-protect.js сам фильтрует iframe через window.top !== window.self.
 
     // ───────────────────────────────────────────────────
     // БЛОК 1: ДЕТЕКТОР ТЕСТА
@@ -98,8 +100,9 @@
     })();
 
     // ───────────────────────────────────────────────────
-    // БЛОК 2: ОЖИДАНИЕ ЯДРА
+    // БЛОК 2: ОЖИДАНИЕ ЯДРА (только в главном окне)
     // ───────────────────────────────────────────────────
+    if (window.top !== window.self) return; // iframe: детектор теста выше уже отработал, дальше не нужно
     function waitForCore() {
         return new Promise(resolve => {
             if (window.__HH_CORE_READY__) { resolve(); return; }

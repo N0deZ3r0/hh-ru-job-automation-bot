@@ -2,6 +2,12 @@
 (function() {
     'use strict';
 
+    // [FIX iframe Date.now] Не запускаем fingerprint-патчи в iframe — hh.ru патчит
+    // Date.now внутри своей страницы, и повторный патч внутри iframe вызывает
+    // "Date.now is not a function". iframe используется только для проверки тестов
+    // и не нуждается в подмене fingerprint.
+    if (window.top !== window.self) return;
+
     // [FIX двойное выполнение] content_scripts и executeScript могут запустить скрипт дважды.
     // Флаг гарантирует что патчи накладываются ровно один раз.
     if (window.__hh_injected__) return;
@@ -472,6 +478,85 @@
 
             return origMM(fakeQuery !== query ? fakeQuery : query);
         };
+    } catch(e) {}
+
+    // ===== TIMING NOISE =====
+    // Браузер возвращает performance.now() кратным 1мс (защита от Spectre).
+    // Бот делает паузы через setTimeout — тоже кратные 1мс. В сумме это
+    // детектируемый паттерн: все временны́е метки слишком «круглые».
+    // Добавляем субмиллисекундный шум [0, 0.1мс] — значения становятся
+    // реалистичными как у живого браузера с реальным пользователем.
+    try {
+        var _origPerfNow = performance.now.bind(performance);
+
+        // Стабильный сид на сессию — шум воспроизводимый, не случайный при каждом вызове
+        var _timingSeed = (function() {
+            var buf = new Uint32Array(2);
+            crypto.getRandomValues(buf);
+            return buf[0] ^ buf[1];
+        })();
+
+        // Быстрый LCG-генератор — не тормозит при частых вызовах
+        function _nextNoise() {
+            _timingSeed = (_timingSeed * 1664525 + 1013904223) >>> 0;
+            // Возвращаем шум в диапазоне [0, 0.099] мс — субмиллисекундный, незаметный
+            return (_timingSeed & 0xFFFF) / 0xFFFF * 0.099;
+        }
+
+        Object.defineProperty(performance, 'now', {
+            get: function() {
+                return function() {
+                    return _origPerfNow() + _nextNoise();
+                };
+            },
+            configurable: true
+        });
+
+        // Date.now() тоже патчим — некоторые трекеры используют его для timing-анализа
+        // [FIX Date.now bind] Сохраняем ссылку на нативный Date.now ДО любых патчей.
+        // Если Date уже был заменён (например самой страницей hh.ru), берём его нативный
+        // эквивалент через Function.prototype.call чтобы избежать рекурсии.
+        var _origDateNow;
+        try {
+            _origDateNow = Date.now.bind(Date);
+            // Проверяем что это функция — hh.ru иногда заменяет Date.now на не-функцию
+            if (typeof _origDateNow !== 'function') throw new Error('not a function');
+        } catch(e) {
+            // Последний резерв — используем performance.now для вычисления timestamp
+            _origDateNow = function() { return Math.floor(_origPerfNow() + performance.timeOrigin); };
+        }
+
+        var _patchedDateNow = function() {
+            return _origDateNow() + (_nextNoise() > 0.05 ? 1 : 0);
+        };
+
+        // Патчим через defineProperty — устойчиво к перезаписи
+        try {
+            Object.defineProperty(Date, 'now', {
+                value: _patchedDateNow,
+                writable: true,
+                configurable: true
+            });
+        } catch(e) {
+            try { Date.now = _patchedDateNow; } catch(e2) {}
+        }
+
+        // Date constructor — new Date() для точных временны́х меток
+        var _OrigDate = Date;
+        window.Date = function() {
+            if (arguments.length === 0) {
+                var d = new _OrigDate();
+                return d;
+            }
+            return new (Function.prototype.bind.apply(_OrigDate, [null].concat(Array.from(arguments))))();
+        };
+        // [FIX Date.now self-ref] Присваиваем _patchedDateNow напрямую — не через Date.now,
+        // который уже мог быть заменён строкой выше и вызывал рекурсию.
+        window.Date.now = _patchedDateNow;
+        window.Date.parse = _OrigDate.parse;
+        window.Date.UTC = _OrigDate.UTC;
+        Object.setPrototypeOf(window.Date, _OrigDate);
+        window.Date.prototype = _OrigDate.prototype;
     } catch(e) {}
 
     } // конец функции initProtection
