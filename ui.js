@@ -188,7 +188,7 @@
                     '<button id="hh-clear" class="hhext-btn hhext-btn-action">\uD83D\uDDD1\uFE0F Очистить</button>' +
                     '<button id="hh-clear-auto-filter" class="hhext-btn hhext-btn-action" style="color:' + (isDark ? '#f87171' : '#ef4444') + ';">\uD83E\uDDF9 Автофильтр</button>' +
                 '</div>' +
-                '<div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(bot.version || '2.2') + '</div>';
+                '<div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX | Siarhei Karnach \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(bot.version || '2.2') + '</div>';
 
             const letterEl = d.querySelector('#hh-letter');
             if (letterEl) letterEl.value = bot.coverLetter || '';
