@@ -15,7 +15,6 @@ const GPU_VARIANTS = [
 
 function getRandomGPU() {
     const totalWeight = GPU_VARIANTS.reduce((sum, gpu) => sum + gpu.weight, 0);
-    // [FIX crypto.random] Используем криптографически стойкий RNG вместо Math.random()
     const buf = new Uint32Array(1);
     crypto.getRandomValues(buf);
     let random = (buf[0] / 0xFFFFFFFF) * totalWeight;
@@ -26,32 +25,27 @@ function getRandomGPU() {
     return { webglVendor: GPU_VARIANTS[0].vendor, webglRenderer: GPU_VARIANTS[0].renderer };
 }
 
-// ===== ФИКСИРОВАННАЯ ВИДЕОКАРТА (через chrome.storage) =====
 let DEFAULT_PROFILE = null;
 let initializationPromise = null;
-// [FIX двойной запуск] Флаг однократной инициализации — onStartup и onInstalled
-// могут сработать одновременно, этот флаг гарантирует что initialize() выполнится лишь раз.
 let initialized = false;
 
 async function initialize() {
-    // [FIX двойной запуск] Если уже инициализированы — ничего не делаем
     if (initialized) return;
     initialized = true;
 
     try {
         const result = await chrome.storage.local.get(['hh_selected_gpu']);
         let selectedGPU;
-        
+
         if (result.hh_selected_gpu) {
             selectedGPU = result.hh_selected_gpu;
             console.log('[BACKGROUND] Загружена сохранённая видеокарта:', selectedGPU.webglRenderer);
         } else {
             selectedGPU = getRandomGPU();
-            // FIX: добавлена обработка ошибки сохранения — без catch при сбое GPU менялся при каждом перезапуске
             await chrome.storage.local.set({ hh_selected_gpu: selectedGPU }).catch(e => console.warn('[BACKGROUND] storage save failed:', e));
             console.log('[BACKGROUND] Выбрана новая видеокарта:', selectedGPU.webglRenderer);
         }
-        
+
         DEFAULT_PROFILE = {
             platform: 'Win32',
             hwConcurrency: 8,
@@ -66,23 +60,11 @@ async function initialize() {
             devicePixelRatio: 1,
             webglVendor: selectedGPU.webglVendor,
             webglRenderer: selectedGPU.webglRenderer,
-            // webglParams: реалистичные параметры для NVIDIA RTX-класса
-            // Ключи — значения WebGL-констант которые сайты проверяют чаще всего
             webglParams: {
-                0x0D33: 16384,   // MAX_TEXTURE_SIZE
-                0x8B4D: 16,      // MAX_VERTEX_UNIFORM_VECTORS
-                0x8B49: 16,      // MAX_FRAGMENT_UNIFORM_VECTORS
-                0x8872: 16,      // MAX_TEXTURE_IMAGE_UNITS
-                0x8B4C: 16,      // MAX_VARYING_VECTORS
-                0x8869: 16,      // MAX_VERTEX_ATTRIBS
-                0x851C: 16384,   // MAX_CUBE_MAP_TEXTURE_SIZE
-                0x8B2A: 1024,    // MAX_VERTEX_UNIFORM_COMPONENTS (WebGL2)
-                0x8A2B: 1024,    // MAX_FRAGMENT_UNIFORM_COMPONENTS (WebGL2)
-                0x88FF: 8,       // MAX_VERTEX_TEXTURE_IMAGE_UNITS
-                0x8073: 4096,    // MAX_RENDERBUFFER_SIZE
-                0x84E8: 16,      // MAX_COMBINED_TEXTURE_IMAGE_UNITS
-                0x0B45: 2,       // LINE_WIDTH range max
-                0x9111: 4,       // MAX_SAMPLES (WebGL2 MSAA)
+                0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
+                0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
+                0x8A2B: 1024, 0x88FF: 8, 0x8073: 4096, 0x84E8: 16,
+                0x0B45: 2, 0x9111: 4,
             },
             allowedFonts: [
                 'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
@@ -91,7 +73,6 @@ async function initialize() {
                 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Wingdings'
             ],
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            // FIX: appVersion отсутствовал — tz-patch.js fallback ставил полный UA с Mozilla/5.0 префиксом что неверно
             appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
             clientHints: {
                 brands: [{ brand: 'Chromium', version: '148' }, { brand: 'Google Chrome', version: '148' }, { brand: 'Not/A)Brand', version: '99' }],
@@ -101,28 +82,17 @@ async function initialize() {
                 architecture: 'x86',
                 bitness: '64'
             },
-            // [FIX version] Передаём версию в профиль — ui.js читает bot.version
-            version: '2.2'
+            version: '2.4'
         };
-        
+
     } catch(e) {
         console.error('[BACKGROUND] Ошибка:', e);
-        // Fallback
         const fallbackGPU = getRandomGPU();
         DEFAULT_PROFILE = {
-            platform: 'Win32',
-            hwConcurrency: 8,
-            deviceMemory: 16,
-            vendor: 'Google Inc.',
-            language: 'ru-RU',
-            languages: ['ru-RU', 'ru'],
-            webdriver: false,
-            timezone: 'Europe/Moscow',
-            screenWidth: 1920,
-            screenHeight: 1080,
-            devicePixelRatio: 1,
-            webglVendor: fallbackGPU.webglVendor,
-            webglRenderer: fallbackGPU.webglRenderer,
+            platform: 'Win32', hwConcurrency: 8, deviceMemory: 16, vendor: 'Google Inc.',
+            language: 'ru-RU', languages: ['ru-RU', 'ru'], webdriver: false,
+            timezone: 'Europe/Moscow', screenWidth: 1920, screenHeight: 1080, devicePixelRatio: 1,
+            webglVendor: fallbackGPU.webglVendor, webglRenderer: fallbackGPU.webglRenderer,
             webglParams: {
                 0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
                 0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
@@ -130,46 +100,65 @@ async function initialize() {
                 0x0B45: 2, 0x9111: 4,
             },
             allowedFonts: [
-                // FIX: было [] — пустой список блокировал все шрифты, детектируемая аномалия
                 'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
                 'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
                 'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
                 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Wingdings'
             ],
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            // FIX: appVersion отсутствовал в fallback — аналогично основному профилю
             appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            clientHints: {},
-            version: '2.2'
+            clientHints: {}, version: '2.4'
         };
     }
 }
 
-// Запускаем инициализацию
 initializationPromise = initialize();
 
-// Инжект профиля при загрузке страницы
+// [FIX] Обработчик сообщений от content.js
+// await initializationPromise — гарантирует что SW полностью инициализирован
+// до обработки любого сообщения (актуально при перезапуске SW)
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    (async () => {
+        if (!initializationPromise) initializationPromise = initialize();
+        await initializationPromise;
+
+        if (request.action === 'showNotification') {
+            try {
+                // [FIX] Уникальный notificationId — без него Chrome схлопывает повторные уведомления
+                const notifId = 'hh-bot-' + Date.now();
+                await chrome.notifications.create(notifId, {
+                    type: 'basic',
+                    iconUrl: 'icons/icon48.png',
+                    title: request.title || 'HH Авто-отклик',
+                    message: request.message || ''
+                });
+                // Автоматически скрываем уведомление через 8 секунд
+                setTimeout(() => chrome.notifications.clear(notifId).catch(() => {}), 8000);
+            } catch(e) {
+                console.warn('[BACKGROUND] notification failed:', e.message);
+            }
+            sendResponse({ ok: true });
+        }
+
+        if (request.action === 'checkConnection') {
+            sendResponse({ ok: true, profile: !!DEFAULT_PROFILE });
+        }
+    })();
+    return true; // держим канал открытым для async sendResponse
+});
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status === 'loading') {
-        // [FIX tab.url] Явная проверка до try/catch — отфильтровывает undefined,
-        // chrome://, about:blank и прочие не-http(s) URL без лишних исключений
         if (!tab.url || !tab.url.startsWith('http')) return;
 
         let tabHostname;
         try { tabHostname = new URL(tab.url).hostname; } catch(_) { return; }
         if (tabHostname !== 'hh.ru' && !tabHostname.endsWith('.hh.ru')) return;
 
-        // [FIX SW restart] При перезапуске Service Worker переменные сбрасываются в null.
-        // await null выполняется мгновенно, DEFAULT_PROFILE не готов — инжект пропускается.
-        // Ленивая инициализация гарантирует что initialize() запущен перед использованием.
         if (!initializationPromise) initializationPromise = initialize();
         await initializationPromise;
         if (!DEFAULT_PROFILE) return;
 
-        // [FIX incognito/PDF] Фильтруем заведомо неудачные кейсы до executeScript,
-        // чтобы не генерировать лишние ошибки. PDF проверяем по URL.
-        // Инкогнито не блокируем заранее — Chrome сам кинет ошибку если нет разрешения,
-        // и мы её аккуратно перехватим ниже (deprecated isAllowedIncognitoAccess не используем).
         if (tab.url.split('?')[0].toLowerCase().endsWith('.pdf')) {
             console.info('[BACKGROUND] skipped PDF tab — tabId:', tabId);
             return;
@@ -183,9 +172,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             args: [DEFAULT_PROFILE]
         }).catch(e => {
             const msg = e.message || '';
-            // Временные ошибки — вкладка закрылась пока шёл инжект, не логируем
             if (msg.includes('No tab with id') || msg.includes('The tab was closed')) return;
-            // Инкогнито без разрешения или системные ограничения — ожидаемо, логируем как info
             if (msg.includes('Cannot access') || msg.includes('not allowed in incognito')) {
                 console.info('[BACKGROUND] inject skipped (incognito/restricted) — tabId:', tabId);
                 return;
@@ -195,15 +182,24 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 });
 
-// [FIX двойной запуск] onStartup и onInstalled больше не вызывают initialize() напрямую —
-// флаг initialized внутри функции гарантирует однократное выполнение.
-// Ленивая инициализация в onUpdated покрывает кейс перезапуска SW.
 chrome.runtime.onStartup.addListener(() => {
+    console.log('[BACKGROUND] onStartup — SW перезапущен');
     if (!initializationPromise) initializationPromise = initialize();
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-    // При обновлении расширения GPU уже сохранён — реинициализация не нужна
-    if (details.reason === 'update') return;
+    if (details.reason === 'update') {
+        // При обновлении GPU сохранён — реинициализация не нужна
+        console.log('[BACKGROUND] onInstalled update — GPU сохранён');
+        if (!initializationPromise) initializationPromise = initialize();
+        return;
+    }
+    if (details.reason === 'install') {
+        // [FIX] При первой установке сбрасываем старый GPU из storage —
+        // если расширение переустанавливалось, старый GPU мог остаться.
+        // Новый случайный GPU гарантирует уникальный fingerprint.
+        chrome.storage.local.remove('hh_selected_gpu').catch(() => {});
+        console.log('[BACKGROUND] onInstalled fresh install — GPU сброшен, будет выбран новый');
+    }
     if (!initializationPromise) initializationPromise = initialize();
 });

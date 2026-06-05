@@ -1,4 +1,4 @@
-// ===== HH AUTO RESPONDER v2.2 — BOT LOGIC =====
+// ===== HH AUTO RESPONDER v2.3 — BOT LOGIC =====
 (function() {
     'use strict';
 
@@ -30,31 +30,30 @@
             return false;
         }
 
+        // [FIX storage→chrome] Сохраняем через chrome.storage чтобы данные не были видны hh.ru
         function escapeFromTest() {
             if (window._hh_escaped) return;
             window._hh_escaped = true;
             const vid = window.location.href.match(/vacancyId=(\d+)/)?.[1];
             const empId = window.location.href.match(/employerId=(\d+)/)?.[1];
-            if (empId) {
+            if (empId || vid) {
                 try {
-                    const testEmps = JSON.parse(localStorage.getItem('hh-test-employers') || '[]');
-                    if (!testEmps.includes(empId)) {
-                        testEmps.push(empId);
-                        // FIX: ограничение размера массива — без cap рос бесконечно
-                        if (testEmps.length > 500) testEmps.splice(0, testEmps.length - 500);
-                        localStorage.setItem('hh-test-employers', JSON.stringify(testEmps));
-                    }
-                } catch(e) {}
-            }
-            if (vid) {
-                try {
-                    const skipped = JSON.parse(localStorage.getItem('hh-skipped-vacancies') || '[]');
-                    if (!skipped.includes('id_' + vid)) {
-                        skipped.push('id_' + vid);
-                        // FIX: ограничение размера массива — без cap рос бесконечно
-                        if (skipped.length > 500) skipped.splice(0, skipped.length - 500);
-                        localStorage.setItem('hh-skipped-vacancies', JSON.stringify(skipped));
-                    }
+                    chrome.storage.local.get(['hh-test-employers', 'hh-skipped-vacancies'], (res) => {
+                        const testEmps = res['hh-test-employers'] || [];
+                        const skipped = res['hh-skipped-vacancies'] || [];
+                        let changed = false;
+                        if (empId && !testEmps.includes(empId)) {
+                            testEmps.push(empId);
+                            if (testEmps.length > 500) testEmps.splice(0, testEmps.length - 500);
+                            changed = true;
+                        }
+                        if (vid && !skipped.includes('id_' + vid)) {
+                            skipped.push('id_' + vid);
+                            if (skipped.length > 500) skipped.splice(0, skipped.length - 500);
+                            changed = true;
+                        }
+                        if (changed) chrome.storage.local.set({ 'hh-test-employers': testEmps, 'hh-skipped-vacancies': skipped });
+                    });
                 } catch(e) {}
             }
             destroyObserver();
@@ -62,7 +61,6 @@
         }
 
         if (isTestPage()) { escapeFromTest(); return; }
-
         setTimeout(() => { if (!isDestroyed && isTestPage()) escapeFromTest(); }, 500);
 
         function startObserver() {
@@ -90,8 +88,6 @@
         window.addEventListener('popstate', () => {
             destroyObserver();
             window._hh_escaped = false;
-            // [FIX SPA race] isTestPage проверяется с задержкой — DOM обновляется не мгновенно
-            // после popstate, без задержки возможен ложный детект теста на старом DOM
             setTimeout(() => {
                 if (isTestPage()) { escapeFromTest(); return; }
                 startObserver();
@@ -102,7 +98,8 @@
     // ───────────────────────────────────────────────────
     // БЛОК 2: ОЖИДАНИЕ ЯДРА (только в главном окне)
     // ───────────────────────────────────────────────────
-    if (window.top !== window.self) return; // iframe: детектор теста выше уже отработал, дальше не нужно
+    if (window.top !== window.self) return; // iframe: детектор теста выше уже отработал
+
     function waitForCore() {
         return new Promise(resolve => {
             if (window.__HH_CORE_READY__) { resolve(); return; }
@@ -128,9 +125,26 @@
     // БЛОК 3: ЗАПУСК БОТА
     // ───────────────────────────────────────────────────
     waitForCore().then(() => {
-        // FIX: console.log → console.debug (скрыт по умолчанию в DevTools); единая константа версии
-        const VERSION = '2.2';
+        const VERSION = '2.3';
         console.debug('=== HH Авто-отклик v' + VERSION + ' ===');
+
+        // ── Хранилище: chrome.storage.local вместо localStorage ──────────────
+        // Данные недоступны странице hh.ru через JS — защита от детектирования.
+        // Все методы асинхронные, поэтому load* вызываются в init() и ждут через Promise.
+        const Store = {
+            get(keys) {
+                return new Promise(resolve => {
+                    try { chrome.storage.local.get(keys, res => resolve(res || {})); }
+                    catch(e) { resolve({}); }
+                });
+            },
+            set(obj) {
+                try { chrome.storage.local.set(obj); } catch(e) {}
+            },
+            remove(keys) {
+                try { chrome.storage.local.remove(keys); } catch(e) {}
+            }
+        };
 
         class HHAutoResponder {
             constructor() {
@@ -139,6 +153,7 @@
                 this.skippedVacancies = new Set();
                 this.testEmployerIds = new Set();
                 this.stats = { success: 0, failed: 0, skipped: 0 };
+                this.currentPage = 1;
                 this.settings = {
                     autoNextPage: true,
                     skipResponded: true,
@@ -147,7 +162,11 @@
                     autoRememberOrganizations: true,
                     skipCoverLetter: false,
                     autoSelectResume: true,
-                    resumeTitleMatching: 70
+                    resumeTitleMatching: 70,
+                    // [NEW] Ночной режим — пауза по расписанию
+                    nightModeEnabled: false,
+                    nightModeFrom: 23,   // час начала паузы (0-23)
+                    nightModeTo: 8       // час конца паузы (0-23)
                 };
                 this.filteredOrganizations = [];
                 this.autoFilteredOrganizations = [];
@@ -161,18 +180,18 @@
                 this._updateCountInterval = null;
                 this._eventListeners = [];
                 this._reallyDestroyed = false;
+                // [NEW] Лог сессий — последние 30 запусков
+                this.sessionLog = [];
 
                 window.hhAutoResponder = this;
                 window.__hh_bot_instance__ = this;
                 this.init();
             }
 
-            init() {
+            async init() {
                 if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
-                this.loadSettings();
-                this.loadSkipped();
-                this.loadTestEmployers();
-                // FIX: tryRestoreBot перенесён после загрузки настроек — восстановленный бот видит актуальные данные
+                await this.loadAll();
+                this._checkAutoRestart();
                 tryRestoreBot();
                 this.createInterface();
                 this.setupEventListeners();
@@ -180,64 +199,18 @@
                 this.updateStatus('v' + VERSION + ' Готов' + (W ? ' [WASM]' : ' [JS]'));
             }
 
-            suspend() {
-                this.stopAutoProcess();
-                if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
-            }
+            // [NEW] Загружаем всё из chrome.storage за один запрос
+            async loadAll() {
+                const res = await Store.get([
+                    'hh-auto-settings',
+                    'hh-skipped-vacancies',
+                    'hh-test-employers'
+                ]);
 
-            destroy() {
-                this._reallyDestroyed = true;
-                this.stopAutoProcess();
-                // [FIX interval leak] _updateCountInterval не очищался в destroy() —
-                // интервал продолжал тикать и вызывать getAvailableButtons() на уничтоженном экземпляре
-                if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
-                while (this.iframeCheckQueue.length) { const cb = this.iframeCheckQueue.shift(); if (typeof cb === 'function') cb(); }
-                this.iframeCheckInProgress = false;
-            }
-
-            loadTestEmployers() {
+                // Настройки
                 try {
-                    const saved = localStorage.getItem('hh-test-employers');
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        if (Array.isArray(parsed)) this.testEmployerIds = new Set(parsed.map(String));
-                    }
-                } catch(e) {
-                    localStorage.removeItem('hh-test-employers');
-                    this.testEmployerIds = new Set();
-                }
-            }
-
-            loadSkipped() {
-                try {
-                    const saved = localStorage.getItem('hh-skipped-vacancies');
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        if (Array.isArray(parsed)) {
-                            this.skippedVacancies = new Set(parsed.filter(v => typeof v === 'string' && v.startsWith('id_')));
-                        } else throw new Error('invalid format');
-                    }
-                } catch(e) {
-                    localStorage.removeItem('hh-skipped-vacancies');
-                    this.skippedVacancies = new Set();
-                }
-            }
-
-            addSkippedVacancy(key) {
-                if (!key) return;
-                this.skippedVacancies.add(String(key));
-                if (this.skippedVacancies.size > 500) {
-                    const oldest = this.skippedVacancies.values().next().value;
-                    this.skippedVacancies.delete(oldest);
-                }
-                try { localStorage.setItem('hh-skipped-vacancies', JSON.stringify([...this.skippedVacancies])); } catch(e) {}
-            }
-
-            loadSettings() {
-                try {
-                    const s = localStorage.getItem('hh-auto-settings');
-                    if (s) {
-                        const p = JSON.parse(s);
+                    const p = res['hh-auto-settings'];
+                    if (p) {
                         if (p.coverLetter && typeof p.coverLetter === 'string') this.coverLetter = p.coverLetter;
                         if (p.settings && typeof p.settings === 'object') {
                             const merged = { ...this.settings, ...p.settings };
@@ -249,10 +222,12 @@
                             merged.autoRememberOrganizations = !!merged.autoRememberOrganizations;
                             merged.skipCoverLetter = !!merged.skipCoverLetter;
                             merged.autoSelectResume = !!merged.autoSelectResume;
+                            merged.nightModeEnabled = !!merged.nightModeEnabled;
+                            merged.nightModeFrom = Math.min(23, Math.max(0, parseInt(merged.nightModeFrom) || 23));
+                            merged.nightModeTo   = Math.min(23, Math.max(0, parseInt(merged.nightModeTo)   || 8));
                             this.settings = merged;
                         }
                         if (p.stats && typeof p.stats === 'object') {
-                            // FIX: поля stats из localStorage — строки; "150"++ = NaN / "1501"; Number() приводит к числу
                             this.stats = {
                                 success: Number(p.stats.success) || 0,
                                 failed:  Number(p.stats.failed)  || 0,
@@ -262,8 +237,73 @@
                         if (p.theme === 'dark' || p.theme === 'light') this.theme = p.theme;
                         if (Array.isArray(p.filteredOrganizations)) this.filteredOrganizations = p.filteredOrganizations;
                         if (Array.isArray(p.autoFilteredOrganizations)) this.autoFilteredOrganizations = p.autoFilteredOrganizations;
+                        if (typeof p.currentPage === 'number') this.currentPage = p.currentPage;
+                        if (Array.isArray(p.sessionLog)) this.sessionLog = p.sessionLog;
                     }
-                } catch(e) { localStorage.removeItem('hh-auto-settings'); }
+                } catch(e) { Store.remove('hh-auto-settings'); }
+
+                // Пропущенные вакансии
+                try {
+                    const parsed = res['hh-skipped-vacancies'];
+                    if (Array.isArray(parsed)) {
+                        this.skippedVacancies = new Set(parsed.filter(v => typeof v === 'string' && v.startsWith('id_')));
+                    }
+                } catch(e) { Store.remove('hh-skipped-vacancies'); }
+
+                // Работодатели с тестами
+                try {
+                    const parsed = res['hh-test-employers'];
+                    if (Array.isArray(parsed)) this.testEmployerIds = new Set(parsed.map(String));
+                } catch(e) { Store.remove('hh-test-employers'); }
+            }
+
+            // [FIX auto-restart] Автоперезапуск после reload вызванного ботом
+            _checkAutoRestart() {
+                try {
+                    const flag = sessionStorage.getItem('hh-auto-restart');
+                    if (flag) {
+                        sessionStorage.removeItem('hh-auto-restart');
+                        setTimeout(() => {
+                            if (!this.isRunning) {
+                                this.updateStatus('Автоперезапуск после перезагрузки...');
+                                this.startAutoProcess();
+                            }
+                        }, 2000);
+                    }
+                } catch(e) {}
+            }
+
+            suspend() {
+                this.stopAutoProcess();
+                if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
+            }
+
+            destroy() {
+                this._reallyDestroyed = true;
+                this.stopAutoProcess();
+                if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
+                while (this.iframeCheckQueue.length) { const cb = this.iframeCheckQueue.shift(); if (typeof cb === 'function') cb(); }
+                this.iframeCheckInProgress = false;
+            }
+
+            addSkippedVacancy(key) {
+                if (!key) return;
+                this.skippedVacancies.add(String(key));
+                // [FIX дедупликация] Если employer уже в testEmployerIds — чистим все его id_ записи
+                // из skippedVacancies чтобы не раздувать Set зря (employer блокирует вакансии глобально)
+                if (this.skippedVacancies.size > 300) {
+                    for (const k of [...this.skippedVacancies]) {
+                        if (k.startsWith('id_')) {
+                            this.skippedVacancies.delete(k);
+                            if (this.skippedVacancies.size <= 250) break;
+                        }
+                    }
+                }
+                if (this.skippedVacancies.size > 500) {
+                    const oldest = this.skippedVacancies.values().next().value;
+                    this.skippedVacancies.delete(oldest);
+                }
+                Store.set({ 'hh-skipped-vacancies': [...this.skippedVacancies] });
             }
 
             debouncedSave() {
@@ -272,21 +312,129 @@
             }
 
             saveSettings() {
-                try {
-                    localStorage.setItem('hh-auto-settings', JSON.stringify({
+                Store.set({
+                    'hh-auto-settings': {
                         coverLetter: this.coverLetter,
                         settings: this.settings,
                         stats: this.stats,
                         theme: this.theme,
                         filteredOrganizations: this.filteredOrganizations,
-                        autoFilteredOrganizations: this.autoFilteredOrganizations
-                    }));
-                } catch(e) {}
+                        autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        currentPage: this.currentPage,
+                        sessionLog: this.sessionLog
+                    }
+                });
+            }
+
+            // [NEW] Экспорт всех данных в JSON-файл
+            exportData() {
+                try {
+                    const data = {
+                        version: VERSION,
+                        exported: new Date().toISOString(),
+                        settings: this.settings,
+                        coverLetter: this.coverLetter,
+                        filteredOrganizations: this.filteredOrganizations,
+                        autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        skippedVacancies: [...this.skippedVacancies],
+                        testEmployerIds: [...this.testEmployerIds],
+                        stats: this.stats,
+                        sessionLog: this.sessionLog
+                    };
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'hh-bot-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    this.updateStatus('Экспорт выполнен ✅');
+                } catch(e) { this.updateStatus('Ошибка экспорта: ' + e.message); }
+            }
+
+            // [NEW] Импорт данных из JSON-файла
+            importData() {
+                try {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = '.json';
+                    input.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        const text = await file.text();
+                        const data = JSON.parse(text);
+                        if (data.settings) { this.settings = { ...this.settings, ...data.settings }; }
+                        if (data.coverLetter) this.coverLetter = data.coverLetter;
+                        if (Array.isArray(data.filteredOrganizations)) this.filteredOrganizations = data.filteredOrganizations;
+                        if (Array.isArray(data.autoFilteredOrganizations)) this.autoFilteredOrganizations = data.autoFilteredOrganizations;
+                        if (Array.isArray(data.skippedVacancies)) this.skippedVacancies = new Set(data.skippedVacancies);
+                        if (Array.isArray(data.testEmployerIds)) this.testEmployerIds = new Set(data.testEmployerIds.map(String));
+                        if (Array.isArray(data.sessionLog)) this.sessionLog = data.sessionLog;
+                        // Сохраняем всё включая списки
+                        this.saveSettings();
+                        Store.set({
+                            'hh-skipped-vacancies': [...this.skippedVacancies],
+                            'hh-test-employers': [...this.testEmployerIds]
+                        });
+                        this.createInterface();
+                        this.setupEventListeners();
+                        this.updateStatus('Импорт выполнен ✅ (' + this.filteredOrganizations.length + ' фильтров, ' + this.skippedVacancies.size + ' пропущенных)');
+                    };
+                    input.click();
+                } catch(e) { this.updateStatus('Ошибка импорта: ' + e.message); }
+            }
+
+            // [NEW] Лог сессий — записываем при старте
+            _logSessionStart() {
+                this._sessionStart = {
+                    date: new Date().toISOString().slice(0, 16).replace('T', ' '),
+                    successBefore: this.stats.success,
+                    failedBefore: this.stats.failed,
+                    skippedBefore: this.stats.skipped
+                };
+            }
+
+            // [NEW] Лог сессий — записываем при остановке
+            _logSessionEnd() {
+                if (!this._sessionStart) return;
+                const entry = {
+                    date: this._sessionStart.date,
+                    success: this.stats.success - this._sessionStart.successBefore,
+                    failed: this.stats.failed - this._sessionStart.failedBefore,
+                    skipped: this.stats.skipped - this._sessionStart.skippedBefore,
+                    pages: this.currentPage
+                };
+                if (entry.success + entry.failed > 0) {
+                    this.sessionLog.unshift(entry);
+                    if (this.sessionLog.length > 30) this.sessionLog.pop();
+                    this.saveSettings();
+                }
+                this._sessionStart = null;
             }
 
             wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
             async smartDelay() {
+                // [NEW] Ночной режим — ждём до конца паузы если сейчас «ночное» время
+                if (this.settings.nightModeEnabled) {
+                    const checkNight = () => {
+                        const h = new Date().getHours();
+                        const from = this.settings.nightModeFrom;
+                        const to = this.settings.nightModeTo;
+                        if (from < to) return h >= from && h < to;
+                        // Через полночь: от 23 до 8
+                        return h >= from || h < to;
+                    };
+                    if (checkNight()) {
+                        this.updateStatus('🌙 Ночной режим — пауза до ' + this.settings.nightModeTo + ':00');
+                        while (checkNight() && this.isRunning) {
+                            await this.wait(60000); // проверяем каждую минуту
+                        }
+                        if (!this.isRunning) return;
+                        this.updateStatus('☀️ Ночной режим завершён, продолжаю...');
+                        await this.wait(2000);
+                    }
+                }
                 const base = this.settings.delay * 1000;
                 const microPause = base * (0.15 + Math.random() * 0.2);
                 await this.wait(microPause);
@@ -310,10 +458,61 @@
                         window.scrollBy({ top: -20 + Math.random() * 40, behavior: 'smooth' });
                         await this.wait(150 + Math.random() * 200);
                     }
+                    // Синтетические mousemove к элементу
+                    try {
+                        const rect = element.getBoundingClientRect();
+                        const targetX = rect.left + rect.width * (0.3 + Math.random() * 0.4);
+                        const targetY = rect.top + rect.height * (0.3 + Math.random() * 0.4);
+                        const steps = 2 + Math.floor(Math.random() * 2);
+                        const startX = targetX - (30 + Math.random() * 80);
+                        const startY = targetY - (10 + Math.random() * 30);
+                        for (let s = 0; s <= steps; s++) {
+                            const t = s / steps;
+                            const mx = startX + (targetX - startX) * t + (Math.random() - 0.5) * 8;
+                            const my = startY + (targetY - startY) * t + (Math.random() - 0.5) * 8;
+                            element.dispatchEvent(new MouseEvent('mousemove', {
+                                bubbles: true, cancelable: true,
+                                clientX: mx, clientY: my,
+                                screenX: mx + window.screenX, screenY: my + window.screenY
+                            }));
+                            if (s < steps) await this.wait(20 + Math.random() * 40);
+                        }
+                        await this.wait(80 + Math.random() * 120);
+                    } catch(e) {}
+                } catch(e) {}
+            }
+
+            // [FIX humanMouseMove] Исправлен расчёт координат — движение от startX к targetX,
+            // а не от (0,0) к targetX*frac как было раньше
+            async humanMouseMove(element) {
+                try {
+                    const rect = element.getBoundingClientRect();
+                    if (!rect.width) return;
+                    const targetX = rect.left + rect.width * (0.3 + Math.random() * 0.4);
+                    const targetY = rect.top + rect.height * (0.3 + Math.random() * 0.4);
+                    // Стартовая точка — рядом с элементом, не из угла экрана
+                    const startX = targetX - (40 + Math.random() * 100);
+                    const startY = targetY - (10 + Math.random() * 40);
+                    const steps = 2 + Math.floor(Math.random() * 2);
+                    for (let s = 1; s <= steps; s++) {
+                        const frac = s / steps;
+                        const mx = startX + (targetX - startX) * frac + (Math.random() - 0.5) * 12;
+                        const my = startY + (targetY - startY) * frac + (Math.random() - 0.5) * 8;
+                        element.dispatchEvent(new MouseEvent('mousemove', {
+                            bubbles: true, cancelable: true,
+                            clientX: mx, clientY: my,
+                            screenX: mx + window.screenX, screenY: my + window.screenY
+                        }));
+                        await this.wait(20 + Math.random() * 30);
+                    }
+                    // Финальный mouseover на сам элемент
+                    element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, clientX: targetX, clientY: targetY }));
+                    await this.wait(50 + Math.random() * 80);
                 } catch(e) {}
             }
 
             isLimitReached() {
+                if (this.stats.success >= 198) return true;
                 const lm = document.querySelector('[data-qa-popup-error-code="negotiations-limit-exceeded"]');
                 if (lm?.offsetParent) return true;
                 const ue = document.querySelector('[data-qa-popup-error-code="unknown"]');
@@ -329,7 +528,6 @@
             }
 
             _getCard(b) {
-                // [data-qa~=] — word-match: работает при data-qa="vacancy-serp__vacancy vacancy-serp-item_clickme"
                 return b.closest('[data-qa~="vacancy-serp__vacancy"]')
                     || b.closest('[class*="vacancy-card"]:not([class*="vacancy-card-footer"])')
                     || b.closest('[class*="branded-snippet"]');
@@ -386,7 +584,6 @@
                 const ot = o.trim();
                 if (!ot || this.autoFilteredOrganizations.some(x => x.toLowerCase() === ot.toLowerCase())) return false;
                 this.autoFilteredOrganizations.push(ot);
-                // [FIX утечка памяти] autoFilteredOrganizations рос неограниченно — cap на 1000
                 if (this.autoFilteredOrganizations.length > 1000) {
                     this.autoFilteredOrganizations.splice(0, this.autoFilteredOrganizations.length - 1000);
                 }
@@ -405,6 +602,15 @@
                     this.saveSettings();
                     this.updateStatus('Автофильтр очищен');
                 }
+            }
+
+            // [NEW] Показать лог сессий
+            showSessionLog() {
+                if (!this.sessionLog.length) { this.updateStatus('Лог сессий пуст'); return; }
+                const lines = this.sessionLog.map(s =>
+                    s.date + ' | ✅' + s.success + ' ❌' + s.failed + ' ⏭️' + s.skipped + ' стр.' + (s.pages || 1)
+                ).join('\n');
+                this.updateStatus('ЛОГ СЕССИЙ:\n' + lines);
             }
 
             async waitForIframeSlot() {
@@ -450,9 +656,6 @@
                     const cleanup = () => {
                         if (interval) clearInterval(interval);
                         if (iframe.parentNode) { try { iframe.remove(); } catch(e) {} }
-                        // [FIX дублирующий mutex] notifyIframeSlotFree убран — управление
-                        // параллельностью полностью через _iframeMutex. waitForIframeSlot/
-                        // iframeCheckInProgress были вторым механизмом для того же ресурса.
                         _releaseLock();
                     };
 
@@ -478,7 +681,7 @@
                                 this.addSkippedVacancy('id_' + vacancyId);
                                 if (employerId) {
                                     this.testEmployerIds.add(String(employerId));
-                                    try { localStorage.setItem('hh-test-employers', JSON.stringify([...this.testEmployerIds])); } catch(e) {}
+                                    Store.set({ 'hh-test-employers': [...this.testEmployerIds] });
                                 }
                                 if (organizationName && this.settings.autoRememberOrganizations) this.addToAutoFilter(organizationName);
                                 this.stats.skipped++;
@@ -487,18 +690,15 @@
                                 return;
                             }
 
-                            // 2. Прямой отклик — жмём кнопку в iframe, она закроется
+                            // 2. Прямой отклик
+                            // [FIX directLink race] finish() вызывается ДО click() — предотвращает
+                            // двойной вызов если interval сработает в промежутке 500мс
                             const directLink = d.querySelector('[data-qa="vacancy-response-link-advertising"]');
                             if (directLink && directLink.offsetParent) {
+                                this.stats.success++;
+                                this.updateStatsDisplay();
+                                finish({ isTest: false, directResponse: true });
                                 try { directLink.click(); } catch(e) {}
-                                // FIX: callback захватывает resolved через замыкание — проверяем что ещё не завершено
-                                setTimeout(() => {
-                                    if (!resolved) {
-                                        this.stats.success++;
-                                        this.updateStatsDisplay();
-                                        finish({ isTest: false, directResponse: true });
-                                    }
-                                }, 500);
                                 return;
                             }
 
@@ -515,6 +715,7 @@
                                 return;
                             }
                         } catch(e) {
+                            // SecurityError = CSP заблокировал iframe — это не ошибка бота
                             if (e.name === 'SecurityError' || e.code === 18) {
                                 finish({ isTest: false, denied: true });
                             }
@@ -522,8 +723,9 @@
                     };
 
                     iframe.addEventListener('load', () => {
-                        // [FIX двойной finish] Если interval уже завершил проверку — выходим
                         if (resolved) return;
+                        // Удаляем из DOM сразу — hh.ru не найдёт через querySelectorAll('iframe')
+                        try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch(e) {}
                         setTimeout(() => {
                             checkDoc();
                             if (!resolved) {
@@ -548,8 +750,6 @@
                     }, 12000);
 
                     if (document.body) {
-                        // [FIX interval leak] Оборачиваем appendChild — если бросит исключение,
-                        // interval будет висеть бесконечно. finish() очищает его через cleanup().
                         try {
                             document.body.appendChild(iframe);
                         } catch(e) {
@@ -564,6 +764,19 @@
             async closeChatIfOpened() {
                 try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (b?.offsetParent) { b.click(); await this.wait(500); return true; } } catch(e) {}
                 return false;
+            }
+
+            // [NEW] Принудительно закрыть любую открытую модалку через Escape
+            async forceCloseAnyModal() {
+                try {
+                    const modal = document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
+                    if (modal?.offsetParent) {
+                        const closeBtn = modal.querySelector('[data-qa="vacancy-response-popup-close"], [aria-label="Закрыть"]');
+                        if (closeBtn) { closeBtn.click(); }
+                        else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); }
+                        await this.wait(400);
+                    }
+                } catch(e) {}
             }
 
             async checkAndCloseDirectResponseModal(o) {
@@ -594,11 +807,19 @@
                 if (b) { b.click(); await this.wait(300); }
             }
 
+            // [FIX openResumeDropdown] Retry до 2 раз — на медленных страницах дропдаун не открывается с первого клика
             async openResumeDropdown() {
-                const rc = document.querySelector('[data-qa="resume-title"]');
-                if (rc) {
-                    const cl = rc.closest('[role="button"],[tabindex="0"]');
-                    if (cl) { cl.click(); await this.wait(600); const dd = document.querySelector('[role="listbox"]'); if (dd?.offsetParent) return true; }
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    const rc = document.querySelector('[data-qa="resume-title"]');
+                    if (rc) {
+                        const cl = rc.closest('[role="button"],[tabindex="0"]');
+                        if (cl) {
+                            cl.click();
+                            await this.wait(600 + attempt * 400);
+                            const dd = document.querySelector('[role="listbox"]');
+                            if (dd?.offsetParent) return true;
+                        }
+                    }
                 }
                 return false;
             }
@@ -622,7 +843,6 @@
                 const op = await this.openResumeDropdown();
                 if (!op) return false;
                 await this.wait(500);
-                // FIX: try/finally гарантирует закрытие дропдауна даже при исключении
                 try {
                     const rs = await this.getAllResumes();
                     if (rs.length <= 1) { return false; }
@@ -658,7 +878,6 @@
                 if (!sb) return false;
                 if (sb.hasAttribute('disabled')) {
                     await this.wait(1000);
-                    // FIX: перезапрашиваем кнопку после ожидания — старая ссылка могла остаться disabled
                     sb = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])') || document.querySelector('[data-qa="vacancy-response-submit-popup"]');
                     if (!sb || sb.hasAttribute('disabled')) return false;
                 }
@@ -668,7 +887,6 @@
             }
 
             async _processResponseInternal(o, depth, vacancyTitle) {
-                // FIX: depth не накапливался при рекурсии — stack overflow при петле UI
                 if (depth > 5) return false;
                 if (await this.checkAndCloseDirectResponseModal(o)) return 'DIRECT_RESPONSE';
                 for (let i = 0; i < 3; i++) { await this.closeChatIfOpened(); await this.wait(300); }
@@ -695,7 +913,6 @@
             }
 
             async processResponse(o, depth = 0, vacancyTitle = null) {
-                // FIX: убран мёртвый guard depth>10 — _processResponseInternal обрывает на depth>5
                 const TIMEOUT_MS = 15000;
                 let timeoutId;
                 const timeoutPromise = new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), TIMEOUT_MS); });
@@ -705,7 +922,8 @@
                     return result;
                 } catch(e) {
                     clearTimeout(timeoutId);
-                    await this.closeModal();
+                    // [FIX modal stuck] При таймауте принудительно закрываем модалку через Escape
+                    await this.forceCloseAnyModal();
                     return false;
                 }
             }
@@ -713,7 +931,8 @@
             async safeClick(b) {
                 try {
                     await this.humanScroll(b);
-                    await this.wait(200 + Math.random() * 300);
+                    await this.humanMouseMove(b);
+                    await this.wait(100 + Math.random() * 200);
                     b.click();
                     await this.wait(600 + Math.random() * 400);
                     return true;
@@ -729,104 +948,183 @@
                 return null;
             }
 
+            async waitForButtons(timeoutMs = 8000) {
+                const existing = this.getAvailableButtons();
+                if (existing.length > 0) return existing;
+
+                return new Promise(resolve => {
+                    let timer = null;
+                    let obs = null;
+
+                    const done = () => {
+                        if (timer) clearTimeout(timer);
+                        if (obs) obs.disconnect();
+                        resolve(this.getAvailableButtons());
+                    };
+
+                    obs = new MutationObserver(() => {
+                        if (document.querySelector('[data-qa="vacancy-serp__vacancy_response"]')) done();
+                    });
+
+                    const target = document.body || document.documentElement;
+                    if (target) obs.observe(target, { childList: true, subtree: true });
+
+                    timer = setTimeout(done, timeoutMs);
+                });
+            }
+
             getAvailableButtons() {
-				// [FIX side effect] tryRestoreBot убран из getter — вызывался каждые 5с через updateCount()
-				// и мог пересоздать состояние бота. Вызывается только в startAutoProcess/testProcess/кнопках.
-				if (window.location.href.includes('/applicant/vacancy_response')) return [];
-				return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
-					if (!b.offsetParent || b.style.display === 'none') return false;
-					// FIX: b.href на <button> undefined — фильтр применяем только к <a>-элементам
-					if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
-					if (this.isFilteredOrganization(b)) return false;
-					const vid = this.getVacancyId(b);
-					if (vid && this.skippedVacancies.has('id_' + vid)) return false;
-					const empId = this.getEmployerIdFromCard(b);
-					if (empId && this.testEmployerIds.has(String(empId))) return false;
-					if (this.settings.skipResponded) {
-						const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-						// FIX: innerText триггерит layout reflow; textContent быстрее и достаточен для проверки
-						if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return false;
-					}
-					return true;
-				});
-			}
+                if (window.location.href.includes('/applicant/vacancy_response')) return [];
+                return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
+                    if (!b.offsetParent || b.style.display === 'none') return false;
+                    if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
+                    if (this.isFilteredOrganization(b)) return false;
+                    const vid = this.getVacancyId(b);
+                    if (vid && this.skippedVacancies.has('id_' + vid)) return false;
+                    const empId = this.getEmployerIdFromCard(b);
+                    if (empId && this.testEmployerIds.has(String(empId))) return false;
+                    if (this.settings.skipResponded) {
+                        const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
+                        if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return false;
+                    }
+                    return true;
+                });
+            }
 
             async processSingleVacancy(b, i, t) {
-					tryRestoreBot();
-					const bot = window.hhAutoResponder || this;
-					if (!bot.isRunning) return false;
-					if (bot.isLimitReached()) { bot.updateStatus('Лимит откликов. Остановка.'); bot.stopAutoProcess(); return false; }
+                tryRestoreBot();
+                const bot = window.hhAutoResponder || this;
+                if (!bot.isRunning) return false;
+                if (bot.isLimitReached()) { bot.updateStatus('Лимит откликов. Остановка.'); bot.stopAutoProcess(); return false; }
 
-					const o = bot.getOrganizationNameFromCard(b);
-					const vacancyId = bot.getVacancyId(b);
-					const employerId = bot.getEmployerIdFromCard(b);
-					const vacancyTitle = bot.getVacancyTitleFromCard(b);
+                // [FIX modal stuck] Принудительно закрываем любую висящую модалку перед началом
+                await bot.forceCloseAnyModal();
 
-					// FIX: bt-массив строится один раз — за время итерации фильтры обновляются.
-					// Возвращаем null (не false) чтобы цикл не делал smartDelay для пропущенных.
-					if (!b.offsetParent || b.style.display === 'none') return null;
-					if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
-					if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
-					if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
-					if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
-					if (bot.settings.skipResponded) {
-						const _p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-						if (_p && ((_p.textContent || '').includes('Вы откликнулись') || _p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return null;
-					}
+                const o = bot.getOrganizationNameFromCard(b);
+                const vacancyId = bot.getVacancyId(b);
+                const employerId = bot.getEmployerIdFromCard(b);
+                const vacancyTitle = bot.getVacancyTitleFromCard(b);
 
-					if (vacancyId) {
-						const checkResult = await bot.checkTestViaIframe(vacancyId, employerId, o);
-						if (checkResult.isTest) return false;
-						if (checkResult.directResponse) return false;
-					}
+                // Быстрые фильтры (null = пропуск без счётчика ошибок)
+                if (!b.offsetParent || b.style.display === 'none') return null;
+                if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
+                if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
+                if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (bot.settings.skipResponded) {
+                    const _p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
+                    if (_p && ((_p.textContent || '').includes('Вы откликнулись') || _p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return null;
+                }
 
-					await bot.wait(500 + Math.random() * 500);
-					const _progressPct = t > 0 ? Math.round(((i + 1) / t) * 100) : 0;
-					bot.updateStatus((i + 1) + '/' + t + ' (' + _progressPct + '%) — ' + (o || 'Обработка...'));
+                // Случайный пропуск 5% вакансий — имитирует поведение реального пользователя
+                if (Math.random() < 0.05) {
+                    bot.stats.skipped++;
+                    bot.updateStatsDisplay();
+                    return null;
+                }
 
-					let targetBtn = b;
-					if (!b.offsetParent) {
-						if (vacancyId) targetBtn = bot.findButtonByVacancyId(vacancyId);
-						if (!targetBtn) { bot.stats.skipped++; bot.updateStatsDisplay(); return false; }
-					}
+                if (vacancyId) {
+                    const checkResult = await bot.checkTestViaIframe(vacancyId, employerId, o);
+                    // isTest/directResponse — не ошибки, возвращаем null
+                    if (checkResult.isTest) return null;
+                    if (checkResult.directResponse) return null;
+                    // denied = iframe заблокирован CSP — продолжаем без счётчика ошибок
+                }
 
-					if (!(await bot.safeClick(targetBtn))) { bot.stats.failed++; bot.consecutiveErrors++; bot.updateStatsDisplay(); return false; }
+                await bot.wait(500 + Math.random() * 500);
+                const _progressPct = t > 0 ? Math.round(((i + 1) / t) * 100) : 0;
+                bot.updateStatus('Стр.' + bot.currentPage + ' | ' + (i + 1) + '/' + t + ' (' + _progressPct + '%) — ' + (o || 'Обработка...'));
 
-					await bot.wait(600 + Math.random() * 400);
-					if (await bot.checkAndCloseDirectResponseModal(o)) {
-						bot.stats.skipped++;
-						if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
-						bot.updateStatsDisplay();
-						return false;
-					}
+                let targetBtn = b;
+                if (!b.offsetParent) {
+                    if (vacancyId) targetBtn = bot.findButtonByVacancyId(vacancyId);
+                    if (!targetBtn) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                }
 
-					await bot.wait(700 + Math.random() * 500);
-					bot.resumeSelectedFlag = false;
-					const ok = await bot.processResponse(o, 0, vacancyTitle);
+                if (!(await bot.safeClick(targetBtn))) {
+                    bot.stats.failed++;
+                    bot.consecutiveErrors++;
+                    bot.updateStatsDisplay();
+                    return false;
+                }
 
-					if (ok === 'DIRECT_RESPONSE') {
-						bot.stats.skipped++;
-						if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
-						bot.updateStatsDisplay();
-						await bot.closeModal();
-						return false;
-					}
+                // Активное ожидание модалки вместо фиксированного sleep
+                const modalAppeared = await bot._waitForModal(3000);
+                if (!modalAppeared) {
+                    if (await bot.checkAndCloseDirectResponseModal(o)) {
+                        bot.stats.skipped++;
+                        if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                        bot.updateStatsDisplay();
+                        return null;
+                    }
+                    // [FIX url redirect] Если попали на страницу отклика — возвращаемся
+                    if (window.location.href.includes('/applicant/vacancy_response')) {
+                        window.history.back();
+                        await bot.waitForButtons(5000);
+                    }
+                    return null;
+                }
 
-					if (ok) {
-						bot.consecutiveErrors = 0;
-						bot.stats.success++;
-						if (o && bot.settings.autoRememberOrganizations) {
-							bot.addToAutoFilter(o);
-						}
-					} else {
-						bot.consecutiveErrors++;
-						bot.stats.failed++;
-					}
-					bot.updateStatsDisplay();
-					await bot.closeModal();
-					if (window.location.href.includes('/applicant/vacancy_response')) window.history.back();
-					return ok;
-				}
+                if (await bot.checkAndCloseDirectResponseModal(o)) {
+                    bot.stats.skipped++;
+                    if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                    bot.updateStatsDisplay();
+                    return null;
+                }
+
+                await bot.wait(300 + Math.random() * 300);
+                bot.resumeSelectedFlag = false;
+                const ok = await bot.processResponse(o, 0, vacancyTitle);
+
+                if (ok === 'DIRECT_RESPONSE') {
+                    bot.stats.skipped++;
+                    if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                    bot.updateStatsDisplay();
+                    await bot.closeModal();
+                    return null;
+                }
+
+                if (ok) {
+                    bot.consecutiveErrors = 0;
+                    bot.stats.success++;
+                } else {
+                    bot.consecutiveErrors++;
+                    bot.stats.failed++;
+                }
+                bot.updateStatsDisplay();
+                await bot.closeModal();
+                // [FIX url redirect] Проверяем URL после отклика — возвращаемся если ушли
+                if (window.location.href.includes('/applicant/vacancy_response')) {
+                    window.history.back();
+                    await bot.waitForButtons(5000);
+                }
+                return ok;
+            }
+
+            async _waitForModal(timeoutMs) {
+                const selectors = [
+                    '[data-qa="vacancy-response-submit-popup"]',
+                    '[data-qa="vacancy-response-popup-close"]',
+                    '[role="alertdialog"][aria-modal="true"]',
+                    '[data-qa="vacancy-response-popup-form-letter-input"]'
+                ];
+                const start = Date.now();
+                while (Date.now() - start < timeoutMs) {
+                    for (const sel of selectors) {
+                        const el = document.querySelector(sel);
+                        if (el && el.offsetParent) return true;
+                    }
+                    await this.wait(100);
+                }
+                return false;
+            }
+
+            // [NEW] Уведомление через chrome.notifications при завершении
+            async _sendNotification(title, message) {
+                try {
+                    chrome.runtime.sendMessage({ action: 'showNotification', title, message });
+                } catch(e) {}
+            }
 
             async startAutoProcess() {
                 tryRestoreBot();
@@ -834,75 +1132,81 @@
                 if (bot.isRunning) return;
                 if (window.location.href.includes('/applicant/vacancy_response')) { bot.updateStatus('Перейдите на страницу поиска'); return; }
                 bot.isRunning = true;
+                bot.consecutiveErrors = 0;
+                bot._logSessionStart();
+                const pageMatch = window.location.href.match(/[?&]page=(\d+)/);
+                bot.currentPage = pageMatch ? parseInt(pageMatch[1]) + 1 : 1;
                 bot.updateControlButtons();
                 bot.updateStatus('Запуск...');
                 try {
                     while (bot.isRunning) {
                         await bot.smartDelay();
-                        const bt = bot.getAvailableButtons();
+
+                        const bt = await bot.waitForButtons(8000);
+
                         if (!bt.length) {
-                            // НАДЁЖНОСТЬ: диагностика — сколько кнопок есть в DOM vs сколько прошло фильтр
                             const allBtns = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
                             const visibleBtns = Array.from(allBtns).filter(b => b.offsetParent && b.style.display !== 'none');
                             if (allBtns.length > 0 && visibleBtns.length > 0) {
-                                // Кнопки есть в DOM но все отфильтрованы — сообщаем детально
-                                bot.updateStatus('Все ' + visibleBtns.length + ' вакансий на странице отфильтрованы/пропущены');
+                                bot.updateStatus('Стр.' + bot.currentPage + ' | Все ' + visibleBtns.length + ' отфильтрованы/пропущены');
                             } else {
-                                bot.updateStatus('Все обработаны');
+                                bot.updateStatus('Стр.' + bot.currentPage + ' | Все обработаны');
                             }
                             if (bot.settings.autoNextPage) {
                                 const n = document.querySelector('[data-qa="pager-next"]');
                                 if (n) {
-                                    const pageMatch = window.location.href.match(/[?&]page=(\d+)/);
-                                    const currentPage = pageMatch ? parseInt(pageMatch[1]) + 1 : 2;
-                                    bot.updateStatus('Переход на стр. ' + currentPage + '...');
+                                    bot.currentPage++;
+                                    bot.updateStatus('Переход на стр. ' + bot.currentPage + '...');
                                     n.click();
-                                    await bot.wait(2500 + Math.random() * 1500);
+                                    await bot.wait(500);
+                                    await bot.waitForButtons(10000);
                                     continue;
                                 }
                             }
-                            bot.updateStatus('Завершено! ✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped);
+                            const summary = '✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped;
+                            bot.updateStatus('Завершено! ' + summary);
+                            bot._sendNotification('HH Авто-отклик завершён', summary);
                             bot.saveSettings();
                             break;
                         }
+
                         for (let i = 0; i < bt.length && bot.isRunning; i++) {
                             const _result = await bot.processSingleVacancy(bt[i], i, bt.length);
+
+                            if (bot.consecutiveErrors >= 8) {
+                                bot.updateStatus('Слишком много ошибок — перезагрузка...');
+                                bot.saveSettings();
+                                try { sessionStorage.setItem('hh-auto-restart', '1'); } catch(e) {}
+                                await bot.wait(2000);
+                                window.location.reload();
+                                return;
+                            }
                             if (bot.consecutiveErrors >= 3) {
-                            bot.updateStatus(bot.consecutiveErrors + ' ошибок подряд — пауза 30с...');
-                            await bot.wait(30000);
-                            bot.consecutiveErrors = 0;
-                        }
-                        // НАДЁЖНОСТЬ: если 8+ ошибок подряд — возможно страница зависла, перезагружаем
-                        if (bot.consecutiveErrors >= 8) {
-                            bot.updateStatus('Слишком много ошибок — перезагрузка страницы...');
-                            await bot.wait(2000);
-                            window.location.reload();
-                            return;
-                        }
-                            // FIX: smartDelay только при реальной попытке отклика (не для пропущенных фильтром)
+                                bot.updateStatus('⚠️ ' + bot.consecutiveErrors + ' ошибок подряд — пауза 30с...');
+                                await bot.wait(30000);
+                                bot.consecutiveErrors = 0;
+                            }
                             if (_result !== null && i < bt.length - 1 && bot.isRunning) await bot.smartDelay();
                         }
-                        await bot.wait(500 + Math.random() * 500);
+                        await bot.wait(300 + Math.random() * 300);
                     }
                 } catch(e) {
                     console.error(e);
                 } finally {
-                    // FIX: finally гарантирует вызов stopAutoProcess даже если catch бросит исключение
                     bot.stopAutoProcess();
                 }
             }
 
             stopAutoProcess() {
-                // FIX: убран tryRestoreBot — stop не должен иметь side-effect восстановления
                 const bot = window.hhAutoResponder || this;
                 const wasRunning = bot.isRunning;
                 bot.isRunning = false;
                 bot.updateControlButtons();
                 while (bot.iframeCheckQueue.length) { const cb = bot.iframeCheckQueue.shift(); if (typeof cb === 'function') cb(); }
                 bot.iframeCheckInProgress = false;
-                // UX: показываем итог при ручной остановке
                 if (wasRunning) {
-                    bot.updateStatus('Остановлено ✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped);
+                    bot._logSessionEnd();
+                    bot.updateStatus('Остановлено | Стр.' + bot.currentPage + ' ✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped);
                     bot.saveSettings();
                 }
             }
@@ -910,7 +1214,6 @@
             async testProcess() {
                 tryRestoreBot();
                 const bot = window.hhAutoResponder || this;
-                // FIX: без guard двойной клик запускал два параллельных теста с общим состоянием
                 if (bot.isRunning) return;
                 const bt = bot.getAvailableButtons();
                 if (!bt.length) return;
@@ -919,7 +1222,6 @@
                 try {
                     await bot.processSingleVacancy(bt[0], 0, 1);
                 } finally {
-                    // FIX: finally гарантирует сброс isRunning даже при исключении в processSingleVacancy
                     bot.isRunning = false;
                     bot.updateControlButtons();
                     bot.updateStatus('Тест завершён');
@@ -957,6 +1259,10 @@
                 addListener($('hh-show-auto-filter'), 'click', () => this.showAutoFilter());
                 addListener($('hh-clear'), 'click', () => this.clearHistory());
                 addListener($('hh-clear-auto-filter'), 'click', () => this.clearAutoFilter());
+                // [NEW] Кнопки экспорта/импорта/лога
+                addListener($('hh-export'), 'click', () => this.exportData());
+                addListener($('hh-import'), 'click', () => this.importData());
+                addListener($('hh-session-log'), 'click', () => this.showSessionLog());
                 addListener($('hh-skip-cover-letter'), 'change', e => {
                     this.settings.skipCoverLetter = e.target.checked; this.saveSettings();
                     const ta = $('hh-letter'); if (ta) { ta.style.opacity = e.target.checked ? '0.5' : '1'; ta.style.pointerEvents = e.target.checked ? 'none' : 'auto'; }
@@ -968,8 +1274,6 @@
                 addListener($('hh-letter'), 'input', e => {
                     this.coverLetter = e.target.value;
                     const cc = $('hh-char-count'); if (cc) cc.textContent = e.target.value.length + '/2000';
-                    // [FIX debounce] saveSettings при каждом нажатии клавиши — десятки записей в секунду.
-                    // Сохраняем не чаще раза в 500мс.
                     clearTimeout(this._saveTimer);
                     this._saveTimer = setTimeout(() => this.saveSettings(), 500);
                 });
@@ -978,6 +1282,16 @@
                 addListener($('hh-filter-organizations'), 'change', e => { this.settings.filterOrganizations = e.target.checked; this.debouncedSave(); });
                 addListener($('hh-delay'), 'change', e => { this.settings.delay = parseFloat(e.target.value) || 0.5; this.debouncedSave(); });
                 addListener($('hh-filter-text'), 'input', e => { this.filteredOrganizations = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
+                // [NEW] Ночной режим
+                addListener($('hh-night-mode'), 'change', e => {
+                    this.settings.nightModeEnabled = e.target.checked;
+                    const hrs = document.getElementById('hh-night-hours');
+                    if (hrs) hrs.style.display = e.target.checked ? 'flex' : 'none';
+                    this.debouncedSave();
+                    this.updateStatus(e.target.checked ? '\uD83C\uDF19 Ночной режим включён' : 'Ночной режим выключен');
+                });
+                addListener($('hh-night-from'), 'change', e => { this.settings.nightModeFrom = Math.min(23, Math.max(0, parseInt(e.target.value) || 23)); this.debouncedSave(); });
+                addListener($('hh-night-to'),   'change', e => { this.settings.nightModeTo   = Math.min(23, Math.max(0, parseInt(e.target.value) || 8));  this.debouncedSave(); });
 
                 if (this._updateCountInterval) clearInterval(this._updateCountInterval);
                 this._updateCountInterval = setInterval(() => this.updateCount(), 5000);
@@ -1002,14 +1316,12 @@
                 const el = document.getElementById('hh-stats');
                 if (!el) return;
                 el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped;
-                // Сохраняем статистику при каждом обновлении — не теряется при перезагрузке
                 this.debouncedSave();
             }
 
             updateCount() {
                 const el = document.getElementById('hh-count');
                 if (!el) return;
-                // Не пересчитываем во время работы бота — дорогая операция с DOM
                 if (this.isRunning) return;
                 el.textContent = this.getAvailableButtons().length;
             }
@@ -1065,22 +1377,22 @@
             analyzePage() {
                 const all = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
                 const visible = Array.from(all).filter(b => b.offsetParent && b.style.display !== 'none');
-                this.updateStatus('АНАЛИЗ:\nВсего кнопок: ' + all.length + '\nВидимых: ' + visible.length + '\nДоступно: ' + this.getAvailableButtons().length + '\n\u2705' + this.stats.success + ' \u274C' + this.stats.failed + ' \u23ED\uFE0F' + this.stats.skipped);
+                this.updateStatus('АНАЛИЗ:\nВсего кнопок: ' + all.length + '\nВидимых: ' + visible.length + '\nДоступно: ' + this.getAvailableButtons().length + '\nСтр. ' + this.currentPage + '\n\u2705' + this.stats.success + ' \u274C' + this.stats.failed + ' \u23ED\uFE0F' + this.stats.skipped);
             }
 
             clearHistory() {
                 this.stopAutoProcess();
                 this.skippedVacancies.clear();
                 this.testEmployerIds.clear();
-                try { localStorage.removeItem('hh-skipped-vacancies'); localStorage.removeItem('hh-test-employers'); } catch(e) {}
+                Store.remove(['hh-skipped-vacancies', 'hh-test-employers']);
                 this.stats = { success: 0, failed: 0, skipped: 0 };
+                this.currentPage = 1;
                 this.consecutiveErrors = 0;
                 this.updateStatsDisplay();
                 this.updateStatus('Всё очищено. Бот остановлен.');
             }
         }
 
-        // FIX: guard против дублирующихся listener при повторной инициализации
         if (!window.__HH_MSG_LISTENER__) {
             try {
                 chrome.runtime.onMessage.addListener((r, s, res) => {
@@ -1093,10 +1405,26 @@
 
         let botInstance = null;
 
+        function checkAutoRestart(bot) {
+            try {
+                const flag = sessionStorage.getItem('hh-auto-restart');
+                if (flag === '1') {
+                    sessionStorage.removeItem('hh-auto-restart');
+                    setTimeout(() => {
+                        if (bot && !bot.isRunning) {
+                            bot.updateStatus('Автоперезапуск после перезагрузки...');
+                            bot.startAutoProcess();
+                        }
+                    }, 2500);
+                }
+            } catch(e) {}
+        }
+
         function initBot() {
-            if (botInstance && !botInstance._reallyDestroyed) { botInstance.suspend(); botInstance.init(); return; }
+            if (botInstance && !botInstance._reallyDestroyed) { botInstance.suspend(); botInstance.init(); checkAutoRestart(botInstance); return; }
             if (botInstance && typeof botInstance.destroy === 'function') botInstance.destroy();
             botInstance = new HHAutoResponder();
+            checkAutoRestart(botInstance);
         }
 
         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => setTimeout(initBot, 800)); }
@@ -1104,7 +1432,6 @@
 
         window.addEventListener('beforeunload', () => { if (botInstance && typeof botInstance.suspend === 'function') botInstance.suspend(); });
         window.addEventListener('popstate', () => { setTimeout(() => {
-            // FIX: не реинициализировать если бот работает — сломает UI в процессе обработки
             if (botInstance && !botInstance._reallyDestroyed && !botInstance.isRunning) botInstance.init();
         }, 1000); });
     }).catch(e => console.error('HH AutoResponder init failed:', e));

@@ -1,6 +1,13 @@
-// ===== CORE.JS v2.2 — WASM + СЕТЕВАЯ ЗАЩИТА + CANVAS NOISE =====
+// ===== CORE.JS v2.3 — WASM + СЕТЕВАЯ ЗАЩИТА + CANVAS NOISE =====
 (function() {
     'use strict';
+
+    // [FIX native] Захватываем нативный Date.now до любых патчей страницы или hh-protect.js —
+    // core.js грузится в ISOLATED world, но Date.now в ISOLATED и MAIN — разные объекты,
+    // поэтому патч из hh-protect.js нас не затрагивает. Захват для ясности и надёжности.
+    const _nativeDateNow = (typeof Date !== 'undefined' && typeof Date.now === 'function')
+        ? Date.now.bind(Date)
+        : function() { return +new Date(); };
 
     const CONFIG = {
         URL_CACHE_TTL: 60000,
@@ -200,7 +207,7 @@
         }
         
         const cached = blockUrlCache.get(url);
-        const now = Date.now();
+        const now = _nativeDateNow();
         if (cached && (now - cached.timestamp < CONFIG.URL_CACHE_TTL)) return cached.result;
         if (blockUrlCache.size >= CONFIG.BLOCK_CACHE_MAX) {
             const oldest = blockUrlCache.keys().next().value;

@@ -2,16 +2,26 @@
 (function() {
     'use strict';
 
-    // [FIX iframe Date.now] Не запускаем fingerprint-патчи в iframe — hh.ru патчит
-    // Date.now внутри своей страницы, и повторный патч внутри iframe вызывает
-    // "Date.now is not a function". iframe используется только для проверки тестов
-    // и не нуждается в подмене fingerprint.
+    // [FIX iframe Date.now] Не запускаем fingerprint-патчи в iframe.
     if (window.top !== window.self) return;
 
-    // [FIX двойное выполнение] content_scripts и executeScript могут запустить скрипт дважды.
-    // Флаг гарантирует что патчи накладываются ровно один раз.
+    // [FIX двойное выполнение] Флаг гарантирует однократный запуск патчей.
     if (window.__hh_injected__) return;
     window.__hh_injected__ = true;
+
+    // ── ЗАХВАТ НАТИВНЫХ ФУНКЦИЙ ──────────────────────────────────────────────
+    // Делаем это в самом начале IIFE — до того как страница или другие скрипты
+    // могут заменить Date, performance, crypto и т.д.
+    // Эти ссылки используются внутри initProtection и applyStubs.
+    var _NativeDateNow       = (typeof Date !== 'undefined' && typeof Date.now === 'function')
+                                ? Date.now.bind(Date) : function() { return +new Date(); };
+    var _NativePerfNow       = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                                ? performance.now.bind(performance) : _NativeDateNow;
+    var _NativeDate          = (typeof Date !== 'undefined') ? Date : null;
+    var _NativeCrypto        = (typeof crypto !== 'undefined') ? crypto : null;
+    var _NativeGetRandValues = _NativeCrypto && typeof _NativeCrypto.getRandomValues === 'function'
+                                ? _NativeCrypto.getRandomValues.bind(_NativeCrypto) : null;
+    // ─────────────────────────────────────────────────────────────────────────
 
     var ID = window.__HH_PROFILE_DATA__;
 
@@ -136,7 +146,7 @@
         }
 
         HTMLCanvasElement.prototype.toDataURL = function(fmt, q) {
-            var now = Date.now();
+            var now = _NativeDateNow();
             // [FIX кеш fmt/q] Ключ кеша включает формат и качество —
             // toDataURL('image/jpeg') и toDataURL('image/png') хранятся раздельно.
             var cacheKey = (fmt || 'image/png') + '|' + (q === undefined ? '' : q);
@@ -161,7 +171,7 @@
 
         if (origTB) {
             HTMLCanvasElement.prototype.toBlob = function(callback, fmt, q) {
-                var now = Date.now();
+                var now = _NativeDateNow();
                 // [FIX кеш fmt/q] Тот же составной ключ что и в toDataURL
                 var cacheKey = (fmt || 'image/png') + '|' + (q === undefined ? '' : q);
                 var cached = canvasCache.get(this);
@@ -185,7 +195,7 @@
                 // [FIX this в колбэке] Сохраняем явную ссылку вместо .bind()
                 // [FIX ts timing] Фиксируем время начала вызова, а не завершения колбэка —
                 // TTL отсчитывается от одной точки и в toDataURL, и в toBlob.
-                var blobStartTime = Date.now();
+                var blobStartTime = _NativeDateNow();
                 var self = this;
                 origTB.call(self, function(blob) {
                     var entry2 = canvasCache.get(self) || {};
@@ -487,19 +497,23 @@
     // Добавляем субмиллисекундный шум [0, 0.1мс] — значения становятся
     // реалистичными как у живого браузера с реальным пользователем.
     try {
-        var _origPerfNow = performance.now.bind(performance);
+        // [FIX native capture] Используем _NativePerfNow/_NativeDateNow захваченные
+        // в самом начале IIFE — до того как страница могла заменить эти функции.
+        var _origPerfNow = _NativePerfNow;
 
         // Стабильный сид на сессию — шум воспроизводимый, не случайный при каждом вызове
         var _timingSeed = (function() {
-            var buf = new Uint32Array(2);
-            crypto.getRandomValues(buf);
-            return buf[0] ^ buf[1];
+            if (_NativeGetRandValues) {
+                var buf = new Uint32Array(2);
+                _NativeGetRandValues(buf);
+                return buf[0] ^ buf[1];
+            }
+            return (Math.random() * 0xFFFFFFFF) >>> 0;
         })();
 
         // Быстрый LCG-генератор — не тормозит при частых вызовах
         function _nextNoise() {
             _timingSeed = (_timingSeed * 1664525 + 1013904223) >>> 0;
-            // Возвращаем шум в диапазоне [0, 0.099] мс — субмиллисекундный, незаметный
             return (_timingSeed & 0xFFFF) / 0xFFFF * 0.099;
         }
 
@@ -512,22 +526,9 @@
             configurable: true
         });
 
-        // Date.now() тоже патчим — некоторые трекеры используют его для timing-анализа
-        // [FIX Date.now bind] Сохраняем ссылку на нативный Date.now ДО любых патчей.
-        // Если Date уже был заменён (например самой страницей hh.ru), берём его нативный
-        // эквивалент через Function.prototype.call чтобы избежать рекурсии.
-        var _origDateNow;
-        try {
-            _origDateNow = Date.now.bind(Date);
-            // Проверяем что это функция — hh.ru иногда заменяет Date.now на не-функцию
-            if (typeof _origDateNow !== 'function') throw new Error('not a function');
-        } catch(e) {
-            // Последний резерв — используем performance.now для вычисления timestamp
-            _origDateNow = function() { return Math.floor(_origPerfNow() + performance.timeOrigin); };
-        }
-
+        // [FIX native capture] _NativeDateNow захвачен в начале IIFE — гарантированно нативный
         var _patchedDateNow = function() {
-            return _origDateNow() + (_nextNoise() > 0.05 ? 1 : 0);
+            return _NativeDateNow() + (_nextNoise() > 0.05 ? 1 : 0);
         };
 
         // Патчим через defineProperty — устойчиво к перезаписи
@@ -542,16 +543,14 @@
         }
 
         // Date constructor — new Date() для точных временны́х меток
-        var _OrigDate = Date;
+        var _OrigDate = _NativeDate || Date;
         window.Date = function() {
             if (arguments.length === 0) {
-                var d = new _OrigDate();
-                return d;
+                return new _OrigDate();
             }
             return new (Function.prototype.bind.apply(_OrigDate, [null].concat(Array.from(arguments))))();
         };
-        // [FIX Date.now self-ref] Присваиваем _patchedDateNow напрямую — не через Date.now,
-        // который уже мог быть заменён строкой выше и вызывал рекурсию.
+        // [FIX Date.now self-ref] Присваиваем _patchedDateNow напрямую
         window.Date.now = _patchedDateNow;
         window.Date.parse = _OrigDate.parse;
         window.Date.UTC = _OrigDate.UTC;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HH Авто-отклик Pro",
-  "version": "2.2",
+  "version": "2.3",
   "minimum_chrome_version": "111",
   "description": "Авто-отклик HH.ru с максимальной WASM защитой",
   "permissions": [
@@ -9,7 +9,8 @@
     "storage",
     "declarativeNetRequest",
     "scripting",
-    "tabs"
+    "tabs",
+    "notifications"
   ],
   "host_permissions": [
     "*://*.hh.ru/*",
@@ -35,7 +36,7 @@
       ],
       "run_at": "document_start",
       "world": "MAIN",
-      "all_frames": true
+      "all_frames": false
     },
     {
       "matches": [

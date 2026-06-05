@@ -1,4 +1,4 @@
-// ===== HH AUTO RESPONDER v2.2 — UI (красивые звёзды) =====
+// ===== HH AUTO RESPONDER v2.3 — UI (красивые звёзды) =====
 (function() {
     'use strict';
 
@@ -123,7 +123,7 @@
                     '.hhext-toggle:active .hhext-toggle-thumb { width: 24px; border-radius: 11px; }' +
                 '</style>' +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:nowrap;">' +
-                    '<h3 style="margin:0;color:' + (isDark ? violet : violetDark) + ';font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v2.2 ' + (W ? '\uD83D\uDEE1\uFE0F' : '') + '</h3>' +
+                    '<h3 style="margin:0;color:' + (isDark ? violet : violetDark) + ';font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v2.3 ' + (W ? '\uD83D\uDEE1\uFE0F' : '') + '</h3>' +
                     '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
                         '<span style="font-size:10px;color:' + violet + ';background:' + (isDark ? 'rgba(167,139,250,0.15)' : 'rgba(124,58,237,0.08)') + ';padding:3px 8px;border-radius:8px;font-weight:600;">' + (W ? 'WASM' : 'JS') + '</span>' +
                         '<div id="hh-theme-slider" class="hhext-toggle">' +
@@ -167,6 +167,19 @@
                         '<label style="display:flex;align-items:center;font-size:13px;margin-bottom:5px;color:' + tc + ';cursor:pointer;"><input type="checkbox" id="hh-auto-select-resume" ' + (bot.settings.autoSelectResume ? 'checked' : '') + ' style="margin-right:8px;accent-color:' + violet + ';"><strong>\uD83C\uDFAF Автовыбор резюме</strong></label>' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;color:' + tc + ';"><span style="font-size:12px;">Порог совпадения:</span><input type="range" id="hh-resume-matching" min="0" max="100" step="5" value="' + safeMatching + '" style="width:100px;accent-color:' + violet + ';"><span id="hh-matching-value" style="color:' + violet + ';font-weight:600;">' + safeMatching + '%</span></div>' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:' + tc + ';"><span style="font-size:13px;">Задержка (сек):</span><input type="number" id="hh-delay" min="0.3" max="5" step="0.1" value="' + safeDelay + '" style="width:50px;padding:4px;border:1px solid ' + ib + ';border-radius:6px;background:' + ig + ';color:' + tc + ';text-align:center;"></div>' +
+                        '<div style="margin-top:10px;border-top:1px solid ' + ib + ';padding-top:10px;">' +
+                            '<label style="display:flex;align-items:center;font-size:13px;margin-bottom:6px;color:' + tc + ';cursor:pointer;">' +
+                                '<input type="checkbox" id="hh-night-mode" ' + (bot.settings.nightModeEnabled ? 'checked' : '') + ' style="margin-right:8px;accent-color:' + violet + ';">' +
+                                '<strong>&#x1F319; Ночной режим</strong>' +
+                            '</label>' +
+                            '<div id="hh-night-hours" style="display:' + (bot.settings.nightModeEnabled ? 'flex' : 'none') + ';align-items:center;gap:8px;font-size:12px;color:' + tc + ';margin-left:24px;">' +
+                                '<span>с</span>' +
+                                '<input type="number" id="hh-night-from" min="0" max="23" value="' + safeNum(bot.settings.nightModeFrom, 23) + '" style="width:44px;padding:3px;border:1px solid ' + ib + ';border-radius:6px;background:' + ig + ';color:' + tc + ';text-align:center;">' +
+                                '<span>до</span>' +
+                                '<input type="number" id="hh-night-to" min="0" max="23" value="' + safeNum(bot.settings.nightModeTo, 8) + '" style="width:44px;padding:3px;border:1px solid ' + ib + ';border-radius:6px;background:' + ig + ';color:' + tc + ';text-align:center;">' +
+                                '<span style="color:' + st + ';">&#x447;&#x430;&#x441;&#x43E;&#x432;</span>' +
+                            '</div>' +
+                        '</div>' +
                     '</div>' +
                 '</div>' +
                 '<div style="margin-bottom:12px;">' +
@@ -188,7 +201,7 @@
                     '<button id="hh-clear" class="hhext-btn hhext-btn-action">\uD83D\uDDD1\uFE0F Очистить</button>' +
                     '<button id="hh-clear-auto-filter" class="hhext-btn hhext-btn-action" style="color:' + (isDark ? '#f87171' : '#ef4444') + ';">\uD83E\uDDF9 Автофильтр</button>' +
                 '</div>' +
-                '<div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX | Siarhei Karnach \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(bot.version || '2.2') + '</div>';
+                '<div style="display:flex;gap:8px;margin-bottom:10px;"><button id="hh-export" class="hhext-btn hhext-btn-action">&#x1F4E4; Экспорт</button><button id="hh-import" class="hhext-btn hhext-btn-action">&#x1F4E5; Импорт</button><button id="hh-session-log" class="hhext-btn hhext-btn-action">&#x1F4CB; Лог</button></div><div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX | Siarhei Karnach \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(bot.version || '2.3') + '</div>';
 
             const letterEl = d.querySelector('#hh-letter');
             if (letterEl) letterEl.value = bot.coverLetter || '';
