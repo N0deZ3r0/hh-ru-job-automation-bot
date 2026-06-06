@@ -1,4 +1,4 @@
-// ===== HH AUTO RESPONDER v2.3 — BOT LOGIC =====
+// ===== HH AUTO RESPONDER v2.4 — BOT LOGIC =====
 (function() {
     'use strict';
 
@@ -125,7 +125,7 @@
     // БЛОК 3: ЗАПУСК БОТА
     // ───────────────────────────────────────────────────
     waitForCore().then(() => {
-        const VERSION = '2.3';
+        const VERSION = '2.4';
         console.debug('=== HH Авто-отклик v' + VERSION + ' ===');
 
         // ── Хранилище: chrome.storage.local вместо localStorage ──────────────
@@ -1087,6 +1087,9 @@
                 if (ok) {
                     bot.consecutiveErrors = 0;
                     bot.stats.success++;
+                    // [FIX] Добавляем в автофильтр после успешного отклика —
+                    // раньше addToAutoFilter вызывался только для прямых откликов и тестов
+                    if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
                 } else {
                     bot.consecutiveErrors++;
                     bot.stats.failed++;
@@ -1424,6 +1427,9 @@
             if (botInstance && !botInstance._reallyDestroyed) { botInstance.suspend(); botInstance.init(); checkAutoRestart(botInstance); return; }
             if (botInstance && typeof botInstance.destroy === 'function') botInstance.destroy();
             botInstance = new HHAutoResponder();
+            // [DEBUG] Экспорт только если явно включён флаг отладки —
+            // в обычном режиме window.hhAutoResponder не существует
+            if (sessionStorage.getItem('hh-debug') === '1') window.hhAutoResponder = botInstance;
             checkAutoRestart(botInstance);
         }
 
