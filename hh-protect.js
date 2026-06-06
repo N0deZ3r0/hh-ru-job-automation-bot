@@ -62,6 +62,19 @@
                 configurable: true
             });
         } catch(e) {}
+        // [NEW] UA/platform заглушки в окне 0-100мс до загрузки профиля
+        try {
+            Object.defineProperty(Navigator.prototype, 'userAgent', {
+                get: function() { return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'; },
+                configurable: true
+            });
+        } catch(e) {}
+        try {
+            Object.defineProperty(Navigator.prototype, 'platform', {
+                get: function() { return 'Win32'; },
+                configurable: true
+            });
+        } catch(e) {}
     }
 
     function initProtection(ID) {
@@ -99,9 +112,24 @@
             // Выстраиваем цепочку прототипов в обе стороны
             PatchedDTF.prototype = Object.create(OrigDTF.prototype);
             PatchedDTF.prototype.constructor = PatchedDTF;
+            // [FIX resolvedOptions] Патчим resolvedOptions — Reflect.construct возвращает
+            // нативный объект, его resolvedOptions() отдаёт реальный timezone системы.
+            // Перехватываем и подменяем timeZone в результате.
+            var _origRO = OrigDTF.prototype.resolvedOptions;
+            PatchedDTF.prototype.resolvedOptions = function() {
+                var result = _origRO.call(this);
+                // Создаём новый объект с подменённым timezone
+                return Object.assign({}, result, { timeZone: ID.timezone });
+            };
             // Копируем статические методы (supportedLocalesOf и др.)
             Object.setPrototypeOf(PatchedDTF, OrigDTF);
             Intl.DateTimeFormat = PatchedDTF;
+            // [FIX resolvedOptions на прототипе] Патчим и нативный прототип —
+            // код который вызывает resolvedOptions() на объектах созданных до патча
+            OrigDTF.prototype.resolvedOptions = function() {
+                var result = _origRO.call(this);
+                return Object.assign({}, result, { timeZone: ID.timezone });
+            };
         } catch(e) {}
     }
 
@@ -145,23 +173,28 @@
             }
         }
 
+        // [FIX canvas noise once] WeakMap для отслеживания canvas к которым уже применён шум.
+        // applyCanvasNoise мутирует canvas — повторное применение накапливало артефакты.
+        var noiseApplied = new WeakSet();
+
         HTMLCanvasElement.prototype.toDataURL = function(fmt, q) {
             var now = _NativeDateNow();
-            // [FIX кеш fmt/q] Ключ кеша включает формат и качество —
-            // toDataURL('image/jpeg') и toDataURL('image/png') хранятся раздельно.
-            var cacheKey = (fmt || 'image/png') + '|' + (q === undefined ? '' : q);
+            // [FIX нормализация fmt] undefined → 'image/png' (стандарт HTML5)
+            var normFmt = fmt || 'image/png';
+            var cacheKey = normFmt + '|' + (q === undefined ? '' : String(q));
             var entry = canvasCache.get(this) || {};
 
             if (entry.urls && entry.urls[cacheKey] && (now - entry.ts < CACHE_TTL)) {
                 return entry.urls[cacheKey];
             }
 
-            if (this.width > 0 && this.height > 0) {
-                applyCanvasNoise(this);
+            // [FIX noise once] Применяем шум только один раз на canvas —
+            // последующие вызовы (с другим fmt) берут уже зашумлённые пиксели.
+            if (this.width > 0 && this.height > 0 && !noiseApplied.has(this)) {
+                if (applyCanvasNoise(this)) noiseApplied.add(this);
             }
 
-            var result = origTD.call(this, fmt, q);
-            // Сохраняем под составным ключом, не затираем blob и другие форматы
+            var result = origTD.call(this, normFmt, q);
             entry.urls = entry.urls || {};
             entry.urls[cacheKey] = result;
             entry.ts = now;
@@ -224,10 +257,19 @@
         if (origGID) {
             CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
                 var data = origGID.call(this, x, y, w, h);
+                // [FIX RGB шум] Реальный hardware-шум затрагивает R, G, B каналы.
+                // Старый код менял только альфа (i%4===3) — детектируемая сигнатура.
+                // Теперь добавляем ±1 шум в R, G, B случайно через LCG-сид.
                 var seed = (x * 0x9E3779B1 + y * 0xC2B2AE35) ^ (w * 0x27D4EB2F + h * 0x85EBCA6B);
-                for (var i = 3; i < data.data.length; i += 4) {
+                var d = data.data;
+                for (var i = 0; i < d.length; i += 4) {
                     seed = (seed * 1664525 + 1013904223) >>> 0;
-                    data.data[i] = Math.min(255, Math.max(0, data.data[i] + (seed & 1)));
+                    var noise = (seed >>> 30) & 1; // 0 или 1
+                    var channel = (seed >>> 28) & 3; // 0=R, 1=G, 2=B, 3=skip
+                    if (channel < 3) {
+                        var idx = i + channel;
+                        d[idx] = d[idx] + noise > 255 ? 254 : d[idx] + noise;
+                    }
                 }
                 return data;
             };
@@ -388,6 +430,7 @@
     } catch(e) {}
 
     // ===== FONTS =====
+    var _fontsPatchedSet = new WeakSet(); // [FIX] WeakSet вместо _hhPatched флага
     try {
         var allowedFontsSet = new Set(ID.allowedFonts || []);
 
@@ -426,13 +469,15 @@
 
         if (document.fonts) {
             var FFSProto = Object.getPrototypeOf(document.fonts);
-            if (FFSProto && !FFSProto._hhPatched) {
+            // [FIX _hhPatched] Убран публичный флаг на прототипе — сайт мог
+            // обнаружить его итерацией свойств. Используем WeakSet вместо флага.
+            if (FFSProto && !_fontsPatchedSet.has(FFSProto)) {
                 Object.defineProperty(FFSProto, 'check', {
                     value: fontCheckFn,
                     configurable: true,
                     writable: true
                 });
-                FFSProto._hhPatched = true;
+                _fontsPatchedSet.add(FFSProto);
             }
         }
     } catch(e) {}
@@ -517,14 +562,27 @@
             return (_timingSeed & 0xFFFF) / 0xFFFF * 0.099;
         }
 
-        Object.defineProperty(performance, 'now', {
-            get: function() {
-                return function() {
-                    return _origPerfNow() + _nextNoise();
-                };
-            },
-            configurable: true
-        });
+        // [FIX performance.now via value] get-геттер возвращал новую функцию
+        // при каждом обращении — performance.now !== performance.now детектируется антиботом.
+        // Патчим через value — одна функция, стабильная ссылка.
+        // [FIX монотонность] Храним последнее возвращённое значение —
+        // performance.now() обязан быть монотонным, иначе детектируется.
+        var _lastPerfValue = 0;
+        var _patchedPerfNow = function() {
+            var v = _origPerfNow() + _nextNoise();
+            if (v <= _lastPerfValue) v = _lastPerfValue + 0.001;
+            _lastPerfValue = v;
+            return v;
+        };
+        try {
+            Object.defineProperty(performance, 'now', {
+                value: _patchedPerfNow,
+                writable: true,
+                configurable: true
+            });
+        } catch(e) {
+            try { performance.now = _patchedPerfNow; } catch(e2) {}
+        }
 
         // [FIX native capture] _NativeDateNow захвачен в начале IIFE — гарантированно нативный
         var _patchedDateNow = function() {
@@ -556,6 +614,108 @@
         window.Date.UTC = _OrigDate.UTC;
         Object.setPrototypeOf(window.Date, _OrigDate);
         window.Date.prototype = _OrigDate.prototype;
+    } catch(e) {}
+
+
+    // ===== WINDOW.NAME ОЧИСТКА =====
+    try {
+        if (window.name && (window.name.length > 50 ||
+            /chrome-extension|puppeteer|playwright|selenium|webdriver/i.test(window.name))) {
+            window.name = '';
+        }
+    } catch(e) {}
+
+    // ===== HISTORY.LENGTH =====
+    try {
+        var _fakeHistLen = 3 + (_NativeGetRandValues
+            ? (function(){ var b = new Uint8Array(1); _NativeGetRandValues(b); return b[0]; })()
+            : (Math.random() * 256 | 0)) % 10;
+        Object.defineProperty(history, 'length', {
+            get: function() { return _fakeHistLen; },
+            configurable: true
+        });
+    } catch(e) {}
+
+    // ===== NAVIGATOR.CONNECTION =====
+    try {
+        var _conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (_conn) {
+            Object.defineProperty(_conn, 'effectiveType', { get: function() { return '4g'; }, configurable: true });
+            Object.defineProperty(_conn, 'rtt',          { get: function() { return 50;  }, configurable: true });
+            Object.defineProperty(_conn, 'downlink',     { get: function() { return 10;  }, configurable: true });
+            Object.defineProperty(_conn, 'saveData',     { get: function() { return false; }, configurable: true });
+        }
+    } catch(e) {}
+
+    // ===== INTL LOCALE PATCH =====
+    if (ID.language) {
+        try {
+            var _patchIntlFormat = function(OrigClass) {
+                var Patched = function(loc, opts) {
+                    if (!loc) loc = ID.language;
+                    return Reflect.construct(OrigClass, [loc, opts], new.target || OrigClass);
+                };
+                Patched.prototype = Object.create(OrigClass.prototype);
+                Patched.prototype.constructor = Patched;
+                var _origRO2 = OrigClass.prototype.resolvedOptions;
+                Patched.prototype.resolvedOptions = function() {
+                    return Object.assign({}, _origRO2.call(this), { locale: ID.language });
+                };
+                OrigClass.prototype.resolvedOptions = Patched.prototype.resolvedOptions;
+                Object.setPrototypeOf(Patched, OrigClass);
+                return Patched;
+            };
+            if (typeof Intl.NumberFormat !== 'undefined') Intl.NumberFormat = _patchIntlFormat(Intl.NumberFormat);
+            if (typeof Intl.RelativeTimeFormat !== 'undefined') Intl.RelativeTimeFormat = _patchIntlFormat(Intl.RelativeTimeFormat);
+            if (typeof Intl.ListFormat !== 'undefined') Intl.ListFormat = _patchIntlFormat(Intl.ListFormat);
+        } catch(e) {}
+    }
+
+    // ===== ERROR.STACK ЗАЩИТА =====
+    try {
+        var _origErrStackDesc = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
+        if (_origErrStackDesc && _origErrStackDesc.get) {
+            var _origStackGetter = _origErrStackDesc.get;
+            Object.defineProperty(Error.prototype, 'stack', {
+                get: function() {
+                    var s = _origStackGetter.call(this);
+                    if (!s) return s;
+                    return s.split('\n')
+                        .filter(function(l) { return l.indexOf('chrome-extension://') === -1; })
+                        .join('\n');
+                },
+                configurable: true
+            });
+        }
+    } catch(e) {}
+
+    // ===== FUNCTION.PROTOTYPE.TOSTRING =====
+    // Самая важная защита — патченые функции выглядят нативными через .toString()
+    try {
+        var _nativeLookupSet = new WeakSet();
+        var _origFnToString = Function.prototype.toString;
+        var _markNative = function(fn, name) {
+            if (typeof fn === 'function') {
+                _nativeLookupSet.add(fn);
+                try { Object.defineProperty(fn, 'name', { value: name || fn.name, configurable: true }); } catch(e) {}
+            }
+            return fn;
+        };
+        Function.prototype.toString = function() {
+            if (_nativeLookupSet.has(this)) return 'function ' + (this.name || '') + '() { [native code] }';
+            return _origFnToString.call(this);
+        };
+        _nativeLookupSet.add(Function.prototype.toString);
+        _markNative(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
+        _markNative(HTMLCanvasElement.prototype.toBlob, 'toBlob');
+        if (CanvasRenderingContext2D.prototype.getImageData) _markNative(CanvasRenderingContext2D.prototype.getImageData, 'getImageData');
+        if (window.matchMedia) _markNative(window.matchMedia, 'matchMedia');
+        try { _markNative(performance.now, 'now'); } catch(e) {}
+        try { _markNative(Date.now, 'now'); } catch(e) {}
+        if (navigator.permissions && navigator.permissions.query) _markNative(navigator.permissions.query, 'query');
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) _markNative(navigator.mediaDevices.enumerateDevices, 'enumerateDevices');
+        if (WebGLRenderingContext.prototype.getParameter) _markNative(WebGLRenderingContext.prototype.getParameter, 'getParameter');
+        if (WebGLRenderingContext.prototype.getSupportedExtensions) _markNative(WebGLRenderingContext.prototype.getSupportedExtensions, 'getSupportedExtensions');
     } catch(e) {}
 
     } // конец функции initProtection
