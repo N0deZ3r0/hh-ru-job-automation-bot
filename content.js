@@ -180,6 +180,10 @@
                 };
                 this.filteredOrganizations = [];
                 this.autoFilteredOrganizations = [];
+                // [NEW] Стоп-слова в названии вакансии
+                this.titleStopWords = [];
+                // [NEW] Суточный счётчик откликов — hh.ru ограничивает 200 в СУТКИ
+                this.dailyStats = { date: null, count: 0 };
                 this.theme = 'dark';
                 this.resumeSelectedFlag = false;
                 this.settingsCollapsed = true;
@@ -255,6 +259,13 @@
                         if (p.theme === 'dark' || p.theme === 'light') this.theme = p.theme;
                         if (Array.isArray(p.filteredOrganizations)) this.filteredOrganizations = p.filteredOrganizations;
                         if (Array.isArray(p.autoFilteredOrganizations)) this.autoFilteredOrganizations = p.autoFilteredOrganizations;
+                        if (Array.isArray(p.titleStopWords)) this.titleStopWords = p.titleStopWords.filter(x => typeof x === 'string');
+                        if (p.dailyStats && typeof p.dailyStats === 'object') {
+                            this.dailyStats = {
+                                date: typeof p.dailyStats.date === 'string' ? p.dailyStats.date : null,
+                                count: clampNum(p.dailyStats.count, 0, 1000, 0, true)
+                            };
+                        }
                         if (typeof p.currentPage === 'number') this.currentPage = p.currentPage;
                         if (Array.isArray(p.sessionLog)) this.sessionLog = p.sessionLog;
                     }
@@ -318,6 +329,8 @@
                         theme: this.theme,
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        titleStopWords: this.titleStopWords,
+                        dailyStats: this.dailyStats,
                         currentPage: this.currentPage,
                         sessionLog: this.sessionLog
                     }
@@ -334,6 +347,8 @@
                         coverLetter: this.coverLetter,
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        titleStopWords: this.titleStopWords,
+                        dailyStats: this.dailyStats,
                         skippedVacancies: [...this.skippedVacancies],
                         testEmployerIds: [...this.testEmployerIds],
                         stats: this.stats,
@@ -383,6 +398,7 @@
                             if (typeof data.coverLetter === 'string') this.coverLetter = data.coverLetter;
                             if (Array.isArray(data.filteredOrganizations)) this.filteredOrganizations = data.filteredOrganizations.filter(x => typeof x === 'string');
                             if (Array.isArray(data.autoFilteredOrganizations)) this.autoFilteredOrganizations = data.autoFilteredOrganizations.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.titleStopWords)) this.titleStopWords = data.titleStopWords.filter(x => typeof x === 'string');
                             if (Array.isArray(data.skippedVacancies)) this.skippedVacancies = new Set(data.skippedVacancies.filter(x => typeof x === 'string' && x.startsWith('id_')));
                             if (Array.isArray(data.testEmployerIds)) this.testEmployerIds = new Set(data.testEmployerIds.map(String));
                             if (Array.isArray(data.sessionLog)) this.sessionLog = data.sessionLog;
@@ -441,6 +457,73 @@
                 return '[data-qa="response-popup-close"],'
                      + '[data-qa="vacancy-response-popup-close"],'
                      + '[aria-label="Отмена"],[aria-label="Закрыть"]';
+            }
+
+            // [FIX лимит] Раньше isLimitReached() смотрел на this.stats.success —
+            // счётчик за ВСЁ ВРЕМЯ, который восстанавливается из storage и обнуляется
+            // только кнопкой «Очистить». После 198-го успешного отклика за всю жизнь
+            // установки бот считал лимит исчерпанным и отказывался работать НАВСЕГДА.
+            // Ограничение hh.ru — 200 откликов в сутки, поэтому считаем по дням.
+            _todayKey() {
+                const d = new Date();
+                return d.getFullYear() + '-' +
+                       String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                       String(d.getDate()).padStart(2, '0');
+            }
+
+            _dailyCount() {
+                const today = this._todayKey();
+                if (!this.dailyStats || this.dailyStats.date !== today) {
+                    this.dailyStats = { date: today, count: 0 };
+                }
+                return this.dailyStats.count;
+            }
+
+            _bumpDaily() {
+                this._dailyCount();
+                this.dailyStats.count++;
+                this.debouncedSave();
+            }
+
+            // [NEW] Подстановка в сопроводительное письмо: {вакансия} и {компания}
+            // (а также английские {vacancy} / {company}). Письмо под каждую вакансию
+            // читается живее шаблонного и заметно повышает шанс ответа.
+            _renderCoverLetter(vacancyTitle, organization) {
+                const map = {
+                    'вакансия': vacancyTitle || '',
+                    'vacancy':  vacancyTitle || '',
+                    'компания': organization || '',
+                    'company':  organization || ''
+                };
+                let out = String(this.coverLetter || '').replace(
+                    /\{(вакансия|vacancy|компания|company)\}/gi,
+                    (m, k) => {
+                        const v = map[k.toLowerCase()];
+                        return (v === undefined || v === '') ? m : v;
+                    }
+                );
+                // hh.ru не принимает письмо длиннее 2000 символов
+                if (out.length > 2000) out = out.slice(0, 2000);
+                return out;
+            }
+
+            // [NEW] Стоп-слова в названии вакансии — фильтр по должности,
+            // а не только по работодателю (например «стажёр», «продажи»).
+            isFilteredTitle(b) {
+                if (!this.titleStopWords.length) return false;
+                const t = (this.getVacancyTitleFromCard(b) || '').toLowerCase();
+                if (!t) return false;
+                for (const w of this.titleStopWords) {
+                    const wl = String(w || '').trim().toLowerCase();
+                    if (!wl) continue;
+                    // Простое вхождение подстроки не ловит русские окончания:
+                    // стоп-слово «продажи» не совпало бы с «Менеджер по продажам».
+                    // Отсекаем одну гласную с конца и сравниваем по основе —
+                    // «продаж» находит и «продажам», и «продажник».
+                    const stem = wl.length >= 4 ? wl.replace(/[аеёиоуыэюяй]$/, '') : wl;
+                    if (t.includes(stem)) return true;
+                }
+                return false;
             }
 
             wait(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -581,13 +664,13 @@
             }
 
             isLimitReached() {
-                if (this.stats.success >= 198) return true;
+                if (this._dailyCount() >= 198) return true;
                 const lm = document.querySelector('[data-qa-popup-error-code="negotiations-limit-exceeded"]');
                 if (this._isVisible(lm)) return true;
                 const ue = document.querySelector('[data-qa-popup-error-code="unknown"]');
                 if (this._isVisible(ue)) {
                     const t = ue.textContent || '';
-                    if ((t.includes('не более 200') || t.includes('лимит') || t.includes('исчерпали')) && this.stats.success >= 190) return true;
+                    if ((t.includes('не более 200') || t.includes('лимит') || t.includes('исчерпали')) && this._dailyCount() >= 190) return true;
                 }
                 // [FIX мёртвый селектор] Классов .magritte-text и .bloko-translate-guard
                 // на hh.ru нет: стили собираются CSS-модулями, реальный класс выглядит как
@@ -968,9 +1051,11 @@
                 const ta = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
                 if (ta) {
                     if (!this.settings.skipCoverLetter) {
+                        // [NEW] Подставляем название вакансии и компанию в шаблон
+                        const letter = this._renderCoverLetter(vacancyTitle || this.getVacancyTitleFromModal(), o);
                         const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-                        if (ns) { ns.call(ta, this.coverLetter); ta.dispatchEvent(new Event('input', { bubbles: true })); }
-                        else { ta.value = this.coverLetter; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+                        if (ns) { ns.call(ta, letter); ta.dispatchEvent(new Event('input', { bubbles: true })); }
+                        else { ta.value = letter; ta.dispatchEvent(new Event('input', { bubbles: true })); }
                         await this.wait(500);
                     }
                     return await this.submitResponse();
@@ -1054,6 +1139,7 @@
                     if (!this._isVisible(b) || b.style.display === 'none') return false;
                     if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
                     if (this.isFilteredOrganization(b)) return false;
+                    if (this.isFilteredTitle(b)) return false;
                     const vid = this.getVacancyId(b);
                     if (vid && this.skippedVacancies.has('id_' + vid)) return false;
                     const empId = this.getEmployerIdFromCard(b);
@@ -1081,6 +1167,7 @@
                 if (!bot._isVisible(b) || b.style.display === 'none') return null;
                 if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
                 if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (bot.isFilteredTitle(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
                 if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (bot.settings.skipResponded && bot._isRespondedCard(b)) return null;
@@ -1158,6 +1245,7 @@
                 if (ok) {
                     bot.consecutiveErrors = 0;
                     bot.stats.success++;
+                    bot._bumpDaily();
                     // [FIX] Добавляем в автофильтр после успешного отклика —
                     // раньше addToAutoFilter вызывался только для прямых откликов и тестов
                     if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
@@ -1375,6 +1463,7 @@
                 // раньше сюда проходили и 100 секунд, и 0.001. Зажимаем и возвращаем в поле.
                 addListener($('hh-delay'), 'change', e => { this.settings.delay = clampNum(e.target.value, 0.3, 5, 0.5); e.target.value = this.settings.delay; this.debouncedSave(); });
                 addListener($('hh-filter-text'), 'input', e => { this.filteredOrganizations = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
+                addListener($('hh-title-stopwords'), 'input', e => { this.titleStopWords = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
                 // [NEW] Ночной режим
                 addListener($('hh-night-mode'), 'change', e => {
                     this.settings.nightModeEnabled = e.target.checked;
@@ -1408,7 +1497,8 @@
             updateStatsDisplay() {
                 const el = document.getElementById('hh-stats');
                 if (!el) return;
-                el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped;
+                el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped
+                               + ' | 📅' + this._dailyCount() + '/200';
                 this.debouncedSave();
             }
 
@@ -1444,6 +1534,8 @@
                         reason = 'внешняя ссылка';
                     } else if (this.isFilteredOrganization(b)) {
                         reason = 'фильтр орг.';
+                    } else if (this.isFilteredTitle(b)) {
+                        reason = 'стоп-слово в названии';
                     } else {
                         const vid = this.getVacancyId(b);
                         if (vid && this.skippedVacancies.has('id_' + vid)) {
@@ -1476,6 +1568,8 @@
                 this.testEmployerIds.clear();
                 Store.remove(['hh-skipped-vacancies', 'hh-test-employers']);
                 this.stats = { success: 0, failed: 0, skipped: 0 };
+                // dailyStats НЕ сбрасываем: суточный лимит держит hh.ru, а не бот,
+                // и обнуление счётчика привело бы к отправке сверх лимита и ошибкам.
                 this.currentPage = 1;
                 this.consecutiveErrors = 0;
                 this._lastErrorPauseAt = 0;

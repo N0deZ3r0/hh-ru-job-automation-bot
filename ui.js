@@ -154,7 +154,7 @@
                         '</label>' +
                     '</div>' +
                     '<textarea id="hh-letter" maxlength="2000" style="width:100%;height:100px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;' + (bot.settings.skipCoverLetter ? 'opacity:0.5;pointer-events:none;' : '') + '"></textarea>' +
-                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;display:flex;justify-content:space-between;"><span>* Укажите своё настоящее имя</span><span id="hh-char-count">' + safeCoverLetterLength + '/2000</span></div>' +
+                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;display:flex;justify-content:space-between;gap:8px;"><span>* Своё имя. Подстановки: {вакансия}, {компания}</span><span id="hh-char-count">' + safeCoverLetterLength + '/2000</span></div>' +
                 '</div>' +
                 '<div style="margin-bottom:12px;">' +
                     '<div id="hh-settings-header" style="font-weight:bold;font-size:13px;margin:10px 0 5px 0;color:' + tc + ';cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;">' +
@@ -188,6 +188,11 @@
                     '<textarea id="hh-filter-text" style="width:100%;height:80px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;"></textarea>' +
                     '<div style="font-size:11px;color:' + st + ';margin-top:3px;">* Не откликаться на эти организации (полное или частичное совпадение)</div>' +
                 '</div>' +
+                '<div style="margin-bottom:12px;">' +
+                    '<div style="font-weight:bold;font-size:13px;margin-bottom:5px;color:' + tc + ';">\uD83D\uDD24 Стоп-слова в названии вакансии:</div>' +
+                    '<textarea id="hh-title-stopwords" style="width:100%;height:56px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;"></textarea>' +
+                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;">* Пропускать вакансии, в названии которых есть эти слова</div>' +
+                '</div>' +
                 '<div style="display:flex;flex-direction:column;gap:10px;margin:15px 0 10px;">' +
                     '<button id="hh-start" class="hhext-btn hhext-btn-start">\u25B6\uFE0F НАЧАТЬ АВТО-ОТКЛИК</button>' +
                     '<button id="hh-test" class="hhext-btn hhext-btn-test">\uD83E\uDDEA Тест на 1 вакансию</button>' +
@@ -211,6 +216,12 @@
             if (filterEl) {
                 filterEl.value = (bot.filteredOrganizations || []).join(', ');
                 filterEl.placeholder = 'Введите названия организаций через запятую\nПример: Яндекс, Google';
+            }
+
+            const stopWordsEl = d.querySelector('#hh-title-stopwords');
+            if (stopWordsEl) {
+                stopWordsEl.value = (bot.titleStopWords || []).join(', ');
+                stopWordsEl.placeholder = 'Слова через запятую\nПример: стажёр, продажи, ночная смена';
             }
 
             // FIX: удаляем старую панель только после полного создания новой
