@@ -1,128 +1,192 @@
 // ===== BACKGROUND.JS — инжект профиля в MAIN WORLD =====
 'use strict';
 
+// [FIX формат ANGLE] Замерено в Chrome 152 на живой машине:
+//   ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x00009A49) Direct3D11 vs_5_0 ps_5_0, D3D11)
+// Прежние строки шли без PCI-идентификатора и без суффикса ", D3D11" — такой формат
+// современный Chrome не выдаёт вообще, то есть подменённый рендерер сам себя выдавал.
 const GPU_VARIANTS = [
-    { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0)', weight: 15 },
-    { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)', weight: 12 },
-    { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0)', weight: 8 },
-    { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0)', weight: 10 },
-    { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0)', weight: 8 },
-    { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 6800 XT Direct3D11 vs_5_0 ps_5_0)', weight: 7 },
-    { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 7600 Direct3D11 vs_5_0 ps_5_0)', weight: 5 },
-    { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0)', weight: 20 },
-    { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)', weight: 15 }
+    { family: 'NVIDIA', device: 'NVIDIA GeForce RTX 3060',      pci: '0x00002504', weight: 15 },
+    { family: 'NVIDIA', device: 'NVIDIA GeForce RTX 3070',      pci: '0x00002484', weight: 12 },
+    { family: 'NVIDIA', device: 'NVIDIA GeForce RTX 3080',      pci: '0x00002206', weight: 8 },
+    { family: 'NVIDIA', device: 'NVIDIA GeForce RTX 4060',      pci: '0x00002882', weight: 10 },
+    { family: 'AMD',    device: 'AMD Radeon RX 6700 XT',        pci: '0x000073DF', weight: 8 },
+    { family: 'AMD',    device: 'AMD Radeon RX 6800 XT',        pci: '0x000073BF', weight: 7 },
+    { family: 'AMD',    device: 'AMD Radeon RX 7600',           pci: '0x00007480', weight: 5 },
+    { family: 'Intel',  device: 'Intel(R) Iris(R) Xe Graphics', pci: '0x00009A49', weight: 20 },
+    { family: 'Intel',  device: 'Intel(R) UHD Graphics 630',    pci: '0x00003E92', weight: 15 }
 ];
+
+function angleString(v) {
+    return 'ANGLE (' + v.family + ', ' + v.device + ' (' + v.pci + ') Direct3D11 vs_5_0 ps_5_0, D3D11)';
+}
 
 function getRandomGPU() {
     const totalWeight = GPU_VARIANTS.reduce((sum, gpu) => sum + gpu.weight, 0);
     const buf = new Uint32Array(1);
     crypto.getRandomValues(buf);
     let random = (buf[0] / 0xFFFFFFFF) * totalWeight;
+    let chosen = GPU_VARIANTS[0];
     for (const gpu of GPU_VARIANTS) {
-        if (random < gpu.weight) return { webglVendor: gpu.vendor, webglRenderer: gpu.renderer };
+        if (random < gpu.weight) { chosen = gpu; break; }
         random -= gpu.weight;
     }
-    return { webglVendor: GPU_VARIANTS[0].vendor, webglRenderer: GPU_VARIANTS[0].renderer };
+    return {
+        webglVendor: 'Google Inc. (' + chosen.family + ')',
+        webglRenderer: angleString(chosen)
+    };
 }
 
 let DEFAULT_PROFILE = null;
 let initializationPromise = null;
-let initialized = false;
 
-async function initialize() {
-    if (initialized) return;
-    initialized = true;
-
+// [FIX рассогласование с заголовками] Раньше профиль был зашит константами:
+// Chrome/148, ru-RU, Europe/Moscow, 16 ГБ, 1920x1080, platformVersion 10.0.0.
+// Расширение при этом НЕ трогает исходящие заголовки — сервер видит настоящие
+// User-Agent, Sec-CH-UA и Accept-Language. Замер на живой машине: браузер
+// Chrome 152, локаль et-EE, зона Europe/Tallinn, память 8 ГБ, экран 2008x1255.
+// То есть каждое поле противоречило либо самому браузеру, либо его же заголовкам —
+// такой набор не выдаёт ни одна настоящая машина, и «защита» работала маркером.
+// Теперь всё, что сервер способен перепроверить, берётся у реального браузера,
+// а подменяется только то, что заголовками не видно: видеокарта и шум канваса.
+async function collectRealEnvironment() {
+    const env = {
+        userAgent: navigator.userAgent,
+        appVersion: String(navigator.userAgent).replace(/^Mozilla\//, ''),
+        platform: navigator.platform,
+        hwConcurrency: navigator.hardwareConcurrency,
+        deviceMemory: navigator.deviceMemory,
+        language: navigator.language,
+        languages: Array.from(navigator.languages || []),
+        timezone: null,
+        clientHints: null
+    };
+    try { env.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e) {}
     try {
-        const result = await chrome.storage.local.get(['hh_selected_gpu']);
+        if (navigator.userAgentData) {
+            const hev = await navigator.userAgentData.getHighEntropyValues([
+                'platformVersion', 'architecture', 'bitness', 'uaFullVersion', 'fullVersionList', 'model', 'wow64'
+            ]);
+            env.clientHints = {
+                brands: navigator.userAgentData.brands,
+                platform: navigator.userAgentData.platform,
+                mobile: navigator.userAgentData.mobile,
+                platformVersion: hev.platformVersion,
+                architecture: hev.architecture,
+                bitness: hev.bitness,
+                uaFullVersion: hev.uaFullVersion,
+                fullVersionList: hev.fullVersionList,
+                model: hev.model,
+                wow64: hev.wow64
+            };
+        }
+    } catch(e) {}
+    return env;
+}
+
+function buildProfile(selectedGPU, env) {
+    return {
+        // Подменяем только то, чего нет в заголовках запроса
+        webdriver: false,
+        vendor: 'Google Inc.',
+        webglVendor: selectedGPU.webglVendor,
+        webglRenderer: selectedGPU.webglRenderer,
+        webglParams: {
+            0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
+            0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
+            0x8A2B: 1024, 0x88FF: 8, 0x8073: 4096, 0x84E8: 16,
+            0x0B45: 2, 0x9111: 4,
+        },
+        allowedFonts: [
+            'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
+            'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
+            'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
+            'Times New Roman', 'Trebuchet MS', 'Verdana', 'Wingdings'
+        ],
+
+        // Зеркалим реальный браузер. hh-protect.js сравнивает эти значения с
+        // фактическими и НЕ ставит патч там, где подменять нечего — так меньше
+        // патченых геттеров и меньше поводов для детекта.
+        userAgent: env.userAgent,
+        appVersion: env.appVersion,
+        platform: env.platform,
+        hwConcurrency: env.hwConcurrency,
+        deviceMemory: env.deviceMemory,
+        language: env.language,
+        languages: env.languages,
+        timezone: env.timezone,
+        clientHints: env.clientHints || {},
+
+        // Адреса WASM для MAIN world. chrome.runtime там недоступен, поэтому
+        // ссылки передаются через профиль — иначе hh-protect.js не может
+        // загрузить protect.wasm и остаётся на JS-фолбэках.
+        wasmGlueUrl: chrome.runtime.getURL('protect.js'),
+        wasmBinaryUrl: chrome.runtime.getURL('protect.wasm'),
+
+        // screenWidth/screenHeight/devicePixelRatio намеренно ОТСУТСТВУЮТ.
+        // Зашитые 1920x1080 были меньше реального окна (outerWidth 2008),
+        // а outerWidth > screen.width физически невозможен — это был прямой маркер.
+        // hh-protect.js пропускает патчи экрана, когда полей нет.
+
+        version: '2.4'
+    };
+}
+
+async function initialize(forceNewGpu) {
+    let env;
+    try {
+        env = await collectRealEnvironment();
+    } catch(e) {
+        console.error('[BACKGROUND] Не удалось прочитать окружение:', e);
+        env = { userAgent: navigator.userAgent, appVersion: '', platform: undefined,
+                hwConcurrency: undefined, deviceMemory: undefined, language: undefined,
+                languages: [], timezone: null, clientHints: null };
+    }
+    try {
+        const result = forceNewGpu ? {} : await chrome.storage.local.get(['hh_selected_gpu']);
         let selectedGPU;
 
-        if (result.hh_selected_gpu) {
+        if (result.hh_selected_gpu && result.hh_selected_gpu.webglVendor &&
+            / \(0x[0-9A-Fa-f]{8}\) /.test(result.hh_selected_gpu.webglRenderer || '')) {
+            // Сохранённая карта в старом формате (без PCI-id) перевыбирается,
+            // иначе на диске навсегда осталась бы палевная строка.
             selectedGPU = result.hh_selected_gpu;
             console.log('[BACKGROUND] Загружена сохранённая видеокарта:', selectedGPU.webglRenderer);
         } else {
             selectedGPU = getRandomGPU();
-            await chrome.storage.local.set({ hh_selected_gpu: selectedGPU }).catch(e => console.warn('[BACKGROUND] storage save failed:', e));
+            try {
+                await chrome.storage.local.set({ hh_selected_gpu: selectedGPU });
+            } catch(e) {
+                console.warn('[BACKGROUND] storage save failed:', e);
+            }
             console.log('[BACKGROUND] Выбрана новая видеокарта:', selectedGPU.webglRenderer);
         }
 
-        DEFAULT_PROFILE = {
-            platform: 'Win32',
-            hwConcurrency: 8,
-            deviceMemory: 16,
-            vendor: 'Google Inc.',
-            language: 'ru-RU',
-            languages: ['ru-RU', 'ru'],
-            webdriver: false,
-            timezone: 'Europe/Moscow',
-            screenWidth: 1920,
-            screenHeight: 1080,
-            devicePixelRatio: 1,
-            webglVendor: selectedGPU.webglVendor,
-            webglRenderer: selectedGPU.webglRenderer,
-            webglParams: {
-                0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
-                0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
-                0x8A2B: 1024, 0x88FF: 8, 0x8073: 4096, 0x84E8: 16,
-                0x0B45: 2, 0x9111: 4,
-            },
-            allowedFonts: [
-                'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
-                'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
-                'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
-                'Times New Roman', 'Trebuchet MS', 'Verdana', 'Wingdings'
-            ],
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            clientHints: {
-                brands: [{ brand: 'Chromium', version: '148' }, { brand: 'Google Chrome', version: '148' }, { brand: 'Not/A)Brand', version: '99' }],
-                platform: 'Windows',
-                mobile: false,
-                platformVersion: '10.0.0',
-                architecture: 'x86',
-                bitness: '64'
-            },
-            version: '2.4'
-        };
-
+        DEFAULT_PROFILE = buildProfile(selectedGPU, env);
     } catch(e) {
         console.error('[BACKGROUND] Ошибка:', e);
-        const fallbackGPU = getRandomGPU();
-        DEFAULT_PROFILE = {
-            platform: 'Win32', hwConcurrency: 8, deviceMemory: 16, vendor: 'Google Inc.',
-            language: 'ru-RU', languages: ['ru-RU', 'ru'], webdriver: false,
-            timezone: 'Europe/Moscow', screenWidth: 1920, screenHeight: 1080, devicePixelRatio: 1,
-            webglVendor: fallbackGPU.webglVendor, webglRenderer: fallbackGPU.webglRenderer,
-            webglParams: {
-                0x0D33: 16384, 0x8B4D: 16, 0x8B49: 16, 0x8872: 16,
-                0x8B4C: 16, 0x8869: 16, 0x851C: 16384, 0x8B2A: 1024,
-                0x8A2B: 1024, 0x88FF: 8, 0x8073: 4096, 0x84E8: 16,
-                0x0B45: 2, 0x9111: 4,
-            },
-            allowedFonts: [
-                'Arial', 'Arial Black', 'Calibri', 'Cambria', 'Comic Sans MS',
-                'Consolas', 'Courier New', 'Georgia', 'Impact', 'Lucida Console',
-                'Microsoft Sans Serif', 'Palatino Linotype', 'Segoe UI', 'Tahoma',
-                'Times New Roman', 'Trebuchet MS', 'Verdana', 'Wingdings'
-            ],
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            appVersion: '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-            clientHints: {}, version: '2.4'
-        };
+        DEFAULT_PROFILE = buildProfile(getRandomGPU(), env);
     }
 }
 
-initializationPromise = initialize();
+// [FIX реинициализация] Флаг `initialized` выставлялся ДО завершения initialize(),
+// и повторный вызов уже ничего не делал — перевыбрать GPU было невозможно.
+// Единственный источник правды теперь — сам промис.
+function ensureInitialized(forceNewGpu) {
+    if (forceNewGpu || !initializationPromise) initializationPromise = initialize(forceNewGpu);
+    return initializationPromise;
+}
+
+ensureInitialized();
 
 // [FIX] Обработчик сообщений от content.js
 // await initializationPromise — гарантирует что SW полностью инициализирован
 // до обработки любого сообщения (актуально при перезапуске SW)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
-        if (!initializationPromise) initializationPromise = initialize();
-        await initializationPromise;
+        await ensureInitialized();
 
-        if (request.action === 'showNotification') {
+        if (request && request.action === 'showNotification') {
             try {
                 // [FIX] Уникальный notificationId — без него Chrome схлопывает повторные уведомления
                 const notifId = 'hh-bot-' + Date.now();
@@ -138,11 +202,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 console.warn('[BACKGROUND] notification failed:', e.message);
             }
             sendResponse({ ok: true });
+            return;
         }
 
-        if (request.action === 'checkConnection') {
+        if (request && request.action === 'checkConnection') {
             sendResponse({ ok: true, profile: !!DEFAULT_PROFILE });
+            return;
         }
+        // [FIX висящий канал] Раньше на неизвестное действие sendResponse не вызывался
+        // вовсе, а слушатель всё равно возвращал true — промис отправителя не
+        // резолвился никогда. Отвечаем всегда.
+        sendResponse({ ok: false, error: 'unknown action' });
     })();
     return true; // держим канал открытым для async sendResponse
 });
@@ -155,8 +225,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         try { tabHostname = new URL(tab.url).hostname; } catch(_) { return; }
         if (tabHostname !== 'hh.ru' && !tabHostname.endsWith('.hh.ru')) return;
 
-        if (!initializationPromise) initializationPromise = initialize();
-        await initializationPromise;
+        await ensureInitialized();
         if (!DEFAULT_PROFILE) return;
 
         if (tab.url.split('?')[0].toLowerCase().endsWith('.pdf')) {
@@ -184,22 +253,21 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.runtime.onStartup.addListener(() => {
     console.log('[BACKGROUND] onStartup — SW перезапущен');
-    if (!initializationPromise) initializationPromise = initialize();
+    ensureInitialized();
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
-    if (details.reason === 'update') {
-        // При обновлении GPU сохранён — реинициализация не нужна
-        console.log('[BACKGROUND] onInstalled update — GPU сохранён');
-        if (!initializationPromise) initializationPromise = initialize();
+    if (details.reason === 'install') {
+        // [FIX рассинхрон GPU] Раньше здесь просто удалялся ключ из storage —
+        // но initialize() к этому моменту уже успевал выбрать и СОХРАНИТЬ карту,
+        // и удаление стирало именно её. В памяти оставалась одна карта, в storage —
+        // ничего, и при следующем старте service worker'а профиль менялся сам собой.
+        // Теперь перевыбираем карту явно и сразу сохраняем новую.
+        console.log('[BACKGROUND] onInstalled fresh install — выбираем новый GPU');
+        ensureInitialized(true);
         return;
     }
-    if (details.reason === 'install') {
-        // [FIX] При первой установке сбрасываем старый GPU из storage —
-        // если расширение переустанавливалось, старый GPU мог остаться.
-        // Новый случайный GPU гарантирует уникальный fingerprint.
-        chrome.storage.local.remove('hh_selected_gpu').catch(() => {});
-        console.log('[BACKGROUND] onInstalled fresh install — GPU сброшен, будет выбран новый');
-    }
-    if (!initializationPromise) initializationPromise = initialize();
+    // При обновлении GPU сохранён — перевыбор не нужен
+    if (details.reason === 'update') console.log('[BACKGROUND] onInstalled update — GPU сохранён');
+    ensureInitialized();
 });

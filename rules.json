@@ -406,23 +406,5 @@
         "xmlhttprequest"
       ]
     }
-  },
-  {
-    "id": 34,
-    "priority": 1,
-    "action": {
-      "type": "block"
-    },
-    "condition": {
-      "urlFilter": "*://weborama.ru/*",
-      "resourceTypes": [
-        "image",
-        "ping",
-        "script",
-        "sub_frame",
-        "xmlhttprequest",
-        "websocket"
-      ]
-    }
   }
 ]

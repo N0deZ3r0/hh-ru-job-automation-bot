@@ -146,6 +146,16 @@
             }
         };
 
+        // [FIX] `parseInt(x) || fallback` подменял легитимный 0 значением по умолчанию:
+        // порог совпадения 0% превращался в 70%, «ночь с 0:00» — в «с 23:00»,
+        // а «до 0:00» — в «до 8:00». Теперь ноль проходит, а мусор — нет.
+        function clampNum(v, min, max, dflt, integer) {
+            let n = (typeof v === 'number') ? v : parseFloat(v);
+            if (!Number.isFinite(n)) return dflt;
+            if (integer) n = Math.round(n);
+            return Math.min(max, Math.max(min, n));
+        }
+
         class HHAutoResponder {
             constructor() {
                 this.coverLetter = "Добрый день! Заинтересовала ваша вакансия. Мой опыт соответствует требованиям. Готов(а) к собеседованию. С уважением, [Ваше Имя]";
@@ -170,12 +180,16 @@
                 };
                 this.filteredOrganizations = [];
                 this.autoFilteredOrganizations = [];
+                // [NEW] Стоп-слова в названии вакансии
+                this.titleStopWords = [];
+                // [NEW] Суточный счётчик откликов — hh.ru ограничивает 200 в СУТКИ
+                this.dailyStats = { date: null, count: 0 };
                 this.theme = 'dark';
                 this.resumeSelectedFlag = false;
                 this.settingsCollapsed = true;
                 this.consecutiveErrors = 0;
-                this.iframeCheckInProgress = false;
-                this.iframeCheckQueue = [];
+                // Очередь iframeCheckQueue/waitForIframeSlot удалена: она нигде не
+                // заполнялась, сериализацию проверок делает _iframeMutex.
                 this._iframeMutex = Promise.resolve();
                 this._updateCountInterval = null;
                 this._eventListeners = [];
@@ -183,6 +197,13 @@
                 // [NEW] Лог сессий — последние 30 запусков
                 this.sessionLog = [];
 
+                // [FIX version] Поле не заполнялось, а ui.js читает `bot.version` —
+                // в подвале панели всегда висела зашитая версия из fallback'а.
+                this.version = VERSION;
+                this._lastErrorPauseAt = 0;
+
+                // ISOLATED world: эти свойства видны только скриптам расширения,
+                // страница hh.ru до них не дотягивается.
                 window.hhAutoResponder = this;
                 window.__hh_bot_instance__ = this;
                 this.init();
@@ -191,7 +212,8 @@
             async init() {
                 if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
                 await this.loadAll();
-                this._checkAutoRestart();
+                // Автоперезапуск обрабатывает checkAutoRestart() рядом с initBot() —
+                // дубль здесь только гонялся с ним за один и тот же флаг sessionStorage.
                 tryRestoreBot();
                 this.createInterface();
                 this.setupEventListeners();
@@ -214,8 +236,8 @@
                         if (p.coverLetter && typeof p.coverLetter === 'string') this.coverLetter = p.coverLetter;
                         if (p.settings && typeof p.settings === 'object') {
                             const merged = { ...this.settings, ...p.settings };
-                            merged.delay = Math.min(5, Math.max(0.3, parseFloat(merged.delay) || 0.5));
-                            merged.resumeTitleMatching = Math.min(100, Math.max(0, parseInt(merged.resumeTitleMatching) || 70));
+                            merged.delay = clampNum(merged.delay, 0.3, 5, 0.5);
+                            merged.resumeTitleMatching = clampNum(merged.resumeTitleMatching, 0, 100, 70, true);
                             merged.autoNextPage = !!merged.autoNextPage;
                             merged.skipResponded = !!merged.skipResponded;
                             merged.filterOrganizations = !!merged.filterOrganizations;
@@ -223,8 +245,8 @@
                             merged.skipCoverLetter = !!merged.skipCoverLetter;
                             merged.autoSelectResume = !!merged.autoSelectResume;
                             merged.nightModeEnabled = !!merged.nightModeEnabled;
-                            merged.nightModeFrom = Math.min(23, Math.max(0, parseInt(merged.nightModeFrom) || 23));
-                            merged.nightModeTo   = Math.min(23, Math.max(0, parseInt(merged.nightModeTo)   || 8));
+                            merged.nightModeFrom = clampNum(merged.nightModeFrom, 0, 23, 23, true);
+                            merged.nightModeTo   = clampNum(merged.nightModeTo,   0, 23, 8,  true);
                             this.settings = merged;
                         }
                         if (p.stats && typeof p.stats === 'object') {
@@ -237,6 +259,13 @@
                         if (p.theme === 'dark' || p.theme === 'light') this.theme = p.theme;
                         if (Array.isArray(p.filteredOrganizations)) this.filteredOrganizations = p.filteredOrganizations;
                         if (Array.isArray(p.autoFilteredOrganizations)) this.autoFilteredOrganizations = p.autoFilteredOrganizations;
+                        if (Array.isArray(p.titleStopWords)) this.titleStopWords = p.titleStopWords.filter(x => typeof x === 'string');
+                        if (p.dailyStats && typeof p.dailyStats === 'object') {
+                            this.dailyStats = {
+                                date: typeof p.dailyStats.date === 'string' ? p.dailyStats.date : null,
+                                count: clampNum(p.dailyStats.count, 0, 1000, 0, true)
+                            };
+                        }
                         if (typeof p.currentPage === 'number') this.currentPage = p.currentPage;
                         if (Array.isArray(p.sessionLog)) this.sessionLog = p.sessionLog;
                     }
@@ -257,22 +286,6 @@
                 } catch(e) { Store.remove('hh-test-employers'); }
             }
 
-            // [FIX auto-restart] Автоперезапуск после reload вызванного ботом
-            _checkAutoRestart() {
-                try {
-                    const flag = sessionStorage.getItem('hh-auto-restart');
-                    if (flag) {
-                        sessionStorage.removeItem('hh-auto-restart');
-                        setTimeout(() => {
-                            if (!this.isRunning) {
-                                this.updateStatus('Автоперезапуск после перезагрузки...');
-                                this.startAutoProcess();
-                            }
-                        }, 2000);
-                    }
-                } catch(e) {}
-            }
-
             suspend() {
                 this.stopAutoProcess();
                 if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
@@ -282,26 +295,22 @@
                 this._reallyDestroyed = true;
                 this.stopAutoProcess();
                 if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
-                while (this.iframeCheckQueue.length) { const cb = this.iframeCheckQueue.shift(); if (typeof cb === 'function') cb(); }
-                this.iframeCheckInProgress = false;
             }
 
             addSkippedVacancy(key) {
                 if (!key) return;
                 this.skippedVacancies.add(String(key));
-                // [FIX дедупликация] Если employer уже в testEmployerIds — чистим все его id_ записи
-                // из skippedVacancies чтобы не раздувать Set зря (employer блокирует вакансии глобально)
+                // [FIX] Прежний код срезал список до 250 на отметке 300, поэтому ветка
+                // «если больше 500» была недостижима, а комментарий описывал дедупликацию
+                // по testEmployerIds, которой в коде не было. Оставлен один понятный
+                // срез самых старых записей (Set хранит порядок вставки).
                 if (this.skippedVacancies.size > 300) {
-                    for (const k of [...this.skippedVacancies]) {
-                        if (k.startsWith('id_')) {
-                            this.skippedVacancies.delete(k);
-                            if (this.skippedVacancies.size <= 250) break;
-                        }
+                    const it = this.skippedVacancies.values();
+                    while (this.skippedVacancies.size > 250) {
+                        const oldest = it.next();
+                        if (oldest.done) break;
+                        this.skippedVacancies.delete(oldest.value);
                     }
-                }
-                if (this.skippedVacancies.size > 500) {
-                    const oldest = this.skippedVacancies.values().next().value;
-                    this.skippedVacancies.delete(oldest);
                 }
                 Store.set({ 'hh-skipped-vacancies': [...this.skippedVacancies] });
             }
@@ -320,6 +329,8 @@
                         theme: this.theme,
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        titleStopWords: this.titleStopWords,
+                        dailyStats: this.dailyStats,
                         currentPage: this.currentPage,
                         sessionLog: this.sessionLog
                     }
@@ -336,6 +347,8 @@
                         coverLetter: this.coverLetter,
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
+                        titleStopWords: this.titleStopWords,
+                        dailyStats: this.dailyStats,
                         skippedVacancies: [...this.skippedVacancies],
                         testEmployerIds: [...this.testEmployerIds],
                         stats: this.stats,
@@ -358,27 +371,49 @@
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = '.json';
+                    // [FIX] Обработчик асинхронный — внешний try/catch его исключения не ловил:
+                    // битый JSON давал unhandledrejection и молчание в интерфейсе.
+                    // [FIX] Импортируемые настройки теперь проходят ту же нормализацию,
+                    // что и загрузка из storage — иначе в delay мог приехать любой мусор.
                     input.onchange = async (e) => {
-                        const file = e.target.files[0];
-                        if (!file) return;
-                        const text = await file.text();
-                        const data = JSON.parse(text);
-                        if (data.settings) { this.settings = { ...this.settings, ...data.settings }; }
-                        if (data.coverLetter) this.coverLetter = data.coverLetter;
-                        if (Array.isArray(data.filteredOrganizations)) this.filteredOrganizations = data.filteredOrganizations;
-                        if (Array.isArray(data.autoFilteredOrganizations)) this.autoFilteredOrganizations = data.autoFilteredOrganizations;
-                        if (Array.isArray(data.skippedVacancies)) this.skippedVacancies = new Set(data.skippedVacancies);
-                        if (Array.isArray(data.testEmployerIds)) this.testEmployerIds = new Set(data.testEmployerIds.map(String));
-                        if (Array.isArray(data.sessionLog)) this.sessionLog = data.sessionLog;
-                        // Сохраняем всё включая списки
-                        this.saveSettings();
-                        Store.set({
-                            'hh-skipped-vacancies': [...this.skippedVacancies],
-                            'hh-test-employers': [...this.testEmployerIds]
-                        });
-                        this.createInterface();
-                        this.setupEventListeners();
-                        this.updateStatus('Импорт выполнен ✅ (' + this.filteredOrganizations.length + ' фильтров, ' + this.skippedVacancies.size + ' пропущенных)');
+                        try {
+                            const file = e.target.files && e.target.files[0];
+                            if (!file) return;
+                            const text = await file.text();
+                            const data = JSON.parse(text);
+                            if (!data || typeof data !== 'object') throw new Error('неверный формат файла');
+                            if (data.settings && typeof data.settings === 'object') {
+                                const merged = { ...this.settings, ...data.settings };
+                                merged.delay = clampNum(merged.delay, 0.3, 5, 0.5);
+                                merged.resumeTitleMatching = clampNum(merged.resumeTitleMatching, 0, 100, 70, true);
+                                merged.nightModeFrom = clampNum(merged.nightModeFrom, 0, 23, 23, true);
+                                merged.nightModeTo   = clampNum(merged.nightModeTo,   0, 23, 8,  true);
+                                for (const k of ['autoNextPage','skipResponded','filterOrganizations',
+                                                 'autoRememberOrganizations','skipCoverLetter',
+                                                 'autoSelectResume','nightModeEnabled']) {
+                                    merged[k] = !!merged[k];
+                                }
+                                this.settings = merged;
+                            }
+                            if (typeof data.coverLetter === 'string') this.coverLetter = data.coverLetter;
+                            if (Array.isArray(data.filteredOrganizations)) this.filteredOrganizations = data.filteredOrganizations.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.autoFilteredOrganizations)) this.autoFilteredOrganizations = data.autoFilteredOrganizations.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.titleStopWords)) this.titleStopWords = data.titleStopWords.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.skippedVacancies)) this.skippedVacancies = new Set(data.skippedVacancies.filter(x => typeof x === 'string' && x.startsWith('id_')));
+                            if (Array.isArray(data.testEmployerIds)) this.testEmployerIds = new Set(data.testEmployerIds.map(String));
+                            if (Array.isArray(data.sessionLog)) this.sessionLog = data.sessionLog;
+                            // Сохраняем всё включая списки
+                            this.saveSettings();
+                            Store.set({
+                                'hh-skipped-vacancies': [...this.skippedVacancies],
+                                'hh-test-employers': [...this.testEmployerIds]
+                            });
+                            this.createInterface();
+                            this.setupEventListeners();
+                            this.updateStatus('Импорт выполнен ✅ (' + this.filteredOrganizations.length + ' фильтров, ' + this.skippedVacancies.size + ' пропущенных)');
+                        } catch(err) {
+                            this.updateStatus('Ошибка импорта: ' + (err && err.message ? err.message : err));
+                        }
                     };
                     input.click();
                 } catch(e) { this.updateStatus('Ошибка импорта: ' + e.message); }
@@ -410,6 +445,85 @@
                     this.saveSettings();
                 }
                 this._sessionStart = null;
+            }
+
+            // [FIX кнопка закрытия] Проверено на живой модалке hh.ru: у неё
+            // data-qa="response-popup-close" и aria-label="Отмена".
+            // Бот искал data-qa="vacancy-response-popup-close" (лишний префикс vacancy-)
+            // и aria-label="Закрыть" — оба селектора не находят НИЧЕГО, то есть
+            // closeModal() был полностью холостым, и модалка оставалась висеть.
+            // Старые варианты сохранены как запасные — на случай другой раскладки.
+            static get CLOSE_SEL() {
+                return '[data-qa="response-popup-close"],'
+                     + '[data-qa="vacancy-response-popup-close"],'
+                     + '[aria-label="Отмена"],[aria-label="Закрыть"]';
+            }
+
+            // [FIX лимит] Раньше isLimitReached() смотрел на this.stats.success —
+            // счётчик за ВСЁ ВРЕМЯ, который восстанавливается из storage и обнуляется
+            // только кнопкой «Очистить». После 198-го успешного отклика за всю жизнь
+            // установки бот считал лимит исчерпанным и отказывался работать НАВСЕГДА.
+            // Ограничение hh.ru — 200 откликов в сутки, поэтому считаем по дням.
+            _todayKey() {
+                const d = new Date();
+                return d.getFullYear() + '-' +
+                       String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                       String(d.getDate()).padStart(2, '0');
+            }
+
+            _dailyCount() {
+                const today = this._todayKey();
+                if (!this.dailyStats || this.dailyStats.date !== today) {
+                    this.dailyStats = { date: today, count: 0 };
+                }
+                return this.dailyStats.count;
+            }
+
+            _bumpDaily() {
+                this._dailyCount();
+                this.dailyStats.count++;
+                this.debouncedSave();
+            }
+
+            // [NEW] Подстановка в сопроводительное письмо: {вакансия} и {компания}
+            // (а также английские {vacancy} / {company}). Письмо под каждую вакансию
+            // читается живее шаблонного и заметно повышает шанс ответа.
+            _renderCoverLetter(vacancyTitle, organization) {
+                const map = {
+                    'вакансия': vacancyTitle || '',
+                    'vacancy':  vacancyTitle || '',
+                    'компания': organization || '',
+                    'company':  organization || ''
+                };
+                let out = String(this.coverLetter || '').replace(
+                    /\{(вакансия|vacancy|компания|company)\}/gi,
+                    (m, k) => {
+                        const v = map[k.toLowerCase()];
+                        return (v === undefined || v === '') ? m : v;
+                    }
+                );
+                // hh.ru не принимает письмо длиннее 2000 символов
+                if (out.length > 2000) out = out.slice(0, 2000);
+                return out;
+            }
+
+            // [NEW] Стоп-слова в названии вакансии — фильтр по должности,
+            // а не только по работодателю (например «стажёр», «продажи»).
+            isFilteredTitle(b) {
+                if (!this.titleStopWords.length) return false;
+                const t = (this.getVacancyTitleFromCard(b) || '').toLowerCase();
+                if (!t) return false;
+                for (const w of this.titleStopWords) {
+                    const wl = String(w || '').trim().toLowerCase();
+                    if (!wl) continue;
+                    // Простое вхождение подстроки не ловит русские окончания:
+                    // стоп-слово «продажи» не совпало бы с «Менеджер по продажам».
+                    // Отсекаем одну гласную с конца и сравниваем по основе —
+                    // «продаж» находит и «продажам», и «продажник».
+                    const stem = wl.length >= 4 ? wl.replace(/[аеёиоуыэюяй]$/, '') : wl;
+                    if (t.includes(stem)) return true;
+                }
+                return false;
             }
 
             wait(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -511,18 +625,63 @@
                 } catch(e) {}
             }
 
+            // [FIX offsetParent] По CSSOM у элемента с position:fixed offsetParent
+            // ВСЕГДА null. Модалки hh.ru — магриттовские, их оверлей и контейнер
+            // объявлены position:fixed, поэтому проверки вида `dialog?.offsetParent`
+            // молча считали открытую модалку невидимой. Быстрый путь сохранён:
+            // если offsetParent есть — сразу true, лишних измерений нет.
+            _isVisible(el) {
+                if (!el) return false;
+                if (el.offsetParent) return true;
+                try {
+                    const r = el.getBoundingClientRect();
+                    if (!r.width && !r.height) return false;
+                    const view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+                    const cs = view.getComputedStyle(el);
+                    return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+                } catch(e) { return false; }
+            }
+
+            // [FIX мёртвый класс] .vacancy-serp-item на текущем hh.ru не существует —
+            // вёрстка переехала на CSS-модули (vacancy-card--<hash>). closest() по нему
+            // всегда возвращал null, и карточка находилась только запасным селектором.
+            // Единая точка входа — тот же _getCard, что используется во всём остальном коде.
+            _cardOf(b) {
+                return this._getCard(b) || b.closest('[class*="vacancy-card"]');
+            }
+
+            // [FIX маркер отклика] data-qa="vacancy-serp__vacancy_responded" и текст
+            // «Вы откликнулись» на выдаче больше не встречаются. Актуальный признак —
+            // контейнер статуса workflow-status-container--<hash> (для откликнутых,
+            // отказов, приглашений). Проверено на живой выдаче: он есть ровно у карточек
+            // без кнопки «Откликнуться» и ни у одной из карточек с кнопкой.
+            _isRespondedCard(b) {
+                const p = this._cardOf(b);
+                if (!p) return false;
+                if (p.querySelector('[class*="workflow-status-container"]')) return true;
+                if (p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]')) return true;
+                return (p.textContent || '').includes('Вы откликнулись');
+            }
+
             isLimitReached() {
-                if (this.stats.success >= 198) return true;
+                if (this._dailyCount() >= 198) return true;
                 const lm = document.querySelector('[data-qa-popup-error-code="negotiations-limit-exceeded"]');
-                if (lm?.offsetParent) return true;
+                if (this._isVisible(lm)) return true;
                 const ue = document.querySelector('[data-qa-popup-error-code="unknown"]');
-                if (ue?.offsetParent) {
+                if (this._isVisible(ue)) {
                     const t = ue.textContent || '';
-                    if ((t.includes('не более 200') || t.includes('лимит') || t.includes('исчерпали')) && this.stats.success >= 190) return true;
+                    if ((t.includes('не более 200') || t.includes('лимит') || t.includes('исчерпали')) && this._dailyCount() >= 190) return true;
                 }
-                const ms = document.querySelectorAll('.magritte-text, .bloko-translate-guard');
-                for (const m of ms) {
-                    if (m.textContent && (m.textContent.includes('не более 200 откликов') || m.textContent.includes('Вы исчерпали лимит')) && m.offsetParent) return true;
+                // [FIX мёртвый селектор] Классов .magritte-text и .bloko-translate-guard
+                // на hh.ru нет: стили собираются CSS-модулями, реальный класс выглядит как
+                // magritte-text___pbpft_5-3-12. Точечный селектор не находил НИЧЕГО, и
+                // текстовый фолбэк лимита не работал вовсе. Ищем по подстроке класса и
+                // только внутри модалок — на выдаче элементов magritte-text больше тысячи,
+                // сканировать их все на каждой вакансии слишком дорого.
+                const scopes = document.querySelectorAll('[role="dialog"],[role="alertdialog"],[data-qa-popup-error-code]');
+                for (const scope of scopes) {
+                    const t = scope.textContent || '';
+                    if ((t.includes('не более 200 откликов') || t.includes('Вы исчерпали лимит')) && this._isVisible(scope)) return true;
                 }
                 return false;
             }
@@ -613,30 +772,11 @@
                 this.updateStatus('ЛОГ СЕССИЙ:\n' + lines);
             }
 
-            async waitForIframeSlot() {
-                if (!this.iframeCheckInProgress) return;
-                return new Promise(resolve => {
-                    const slotResolver = () => { clearTimeout(timeout); resolve(); };
-                    this.iframeCheckQueue.push(slotResolver);
-                    const timeout = setTimeout(() => {
-                        const idx = this.iframeCheckQueue.indexOf(slotResolver);
-                        if (idx >= 0) { this.iframeCheckQueue.splice(idx, 1); resolve(); }
-                    }, 15000);
-                });
-            }
-
-            notifyIframeSlotFree() {
-                this.iframeCheckInProgress = false;
-                const next = this.iframeCheckQueue.shift();
-                if (next) next();
-            }
-
             async checkTestViaIframe(vacancyId, employerId, organizationName) {
                 const _prevLock = this._iframeMutex;
                 let _releaseLock;
                 this._iframeMutex = new Promise(r => { _releaseLock = r; });
                 await _prevLock;
-                this.iframeCheckInProgress = true;
                 this.updateStatus('Проверка: ' + (organizationName || '...'));
 
                 return new Promise((resolve) => {
@@ -694,7 +834,7 @@
                             // [FIX directLink race] finish() вызывается ДО click() — предотвращает
                             // двойной вызов если interval сработает в промежутке 500мс
                             const directLink = d.querySelector('[data-qa="vacancy-response-link-advertising"]');
-                            if (directLink && directLink.offsetParent) {
+                            if (directLink && this._isVisible(directLink)) {
                                 this.stats.success++;
                                 this.updateStatsDisplay();
                                 finish({ isTest: false, directResponse: true });
@@ -704,7 +844,7 @@
 
                             // 3. Обычная форма отклика
                             const submitBtn = d.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                            if (submitBtn && submitBtn.offsetParent && !submitBtn.hasAttribute('disabled')) {
+                            if (submitBtn && this._isVisible(submitBtn) && !submitBtn.hasAttribute('disabled')) {
                                 finish({ isTest: false });
                                 return;
                             }
@@ -724,8 +864,12 @@
 
                     iframe.addEventListener('load', () => {
                         if (resolved) return;
-                        // Удаляем из DOM сразу — hh.ru не найдёт через querySelectorAll('iframe')
-                        try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch(e) {}
+                        // [FIX] Раньше iframe удалялся из DOM прямо здесь. Удаление уничтожает
+                        // вложенный browsing context: contentDocument мгновенно становится null,
+                        // и checkDoc() ниже не мог увидеть ни тест, ни форму отклика — проверка
+                        // всегда доходила до таймаута и возвращала {loaded:true}. То есть
+                        // детект тестовых вакансий не работал вообще.
+                        // Элемент и так скрыт (1×1 px за экраном) и удаляется в cleanup().
                         setTimeout(() => {
                             checkDoc();
                             if (!resolved) {
@@ -762,7 +906,7 @@
             }
 
             async closeChatIfOpened() {
-                try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (b?.offsetParent) { b.click(); await this.wait(500); return true; } } catch(e) {}
+                try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (this._isVisible(b)) { b.click(); await this.wait(500); return true; } } catch(e) {}
                 return false;
             }
 
@@ -770,8 +914,8 @@
             async forceCloseAnyModal() {
                 try {
                     const modal = document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
-                    if (modal?.offsetParent) {
-                        const closeBtn = modal.querySelector('[data-qa="vacancy-response-popup-close"], [aria-label="Закрыть"]');
+                    if (this._isVisible(modal)) {
+                        const closeBtn = modal.querySelector(HHAutoResponder.CLOSE_SEL);
                         if (closeBtn) { closeBtn.click(); }
                         else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); }
                         await this.wait(400);
@@ -781,13 +925,12 @@
 
             async checkAndCloseDirectResponseModal(o) {
                 const dialog = document.querySelector('[role="alertdialog"][aria-modal="true"]');
-                if (!dialog?.offsetParent) return false;
+                if (!this._isVisible(dialog)) return false;
                 const title = dialog.querySelector('[data-qa="magritte-alert-title"]') || dialog.querySelector('[data-qa="title"]');
                 if (!title?.textContent.includes('прямым откликом')) return false;
                 if (o && this.settings.autoRememberOrganizations) this.addToAutoFilter(o);
                 const cancelBtn = dialog.querySelector('[data-qa="vacancy-response-link-advertising-cancel"]')
-                               || dialog.querySelector('[data-qa="vacancy-response-popup-close"]')
-                               || dialog.querySelector('button[aria-label="Закрыть"]');
+                               || dialog.querySelector(HHAutoResponder.CLOSE_SEL);
                 if (cancelBtn) { cancelBtn.click(); }
                 else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); }
                 await this.wait(500);
@@ -795,7 +938,9 @@
             }
 
             getVacancyTitleFromModal() {
-                for (const s of ['[data-qa="title-description"] .magritte-text_style-secondary', '[data-qa="title-description"] .magritte-text', '.magritte-modal-content [data-qa="title-description"]', '[role="dialog"] [data-qa="title-description"]']) {
+                // [FIX мёртвый класс] .magritte-text / .magritte-text_style-secondary не
+                // существуют — CSS-модули добавляют хеш. Ищем по подстроке класса.
+                for (const s of ['[data-qa="title-description"] [class*="magritte-text_style-secondary"]', '[data-qa="title-description"] [class*="magritte-text"]', '[class*="magritte-modal-content"] [data-qa="title-description"]', '[role="dialog"] [data-qa="title-description"]', '[data-qa="title-description"]']) {
                     const e = document.querySelector(s);
                     if (e) { const t = e.textContent.trim(); if (t && t.length > 2 && t.length < 200 && !t.includes('Отклик')) return t; }
                 }
@@ -803,8 +948,16 @@
             }
 
             async closeModal() {
-                const b = document.querySelector('[data-qa="vacancy-response-popup-close"]') || document.querySelector('[aria-label="Закрыть"]');
+                const b = document.querySelector(HHAutoResponder.CLOSE_SEL);
                 if (b) { b.click(); await this.wait(300); }
+                // Если кнопка не сработала (или её не нашли) — добиваем Escape.
+                // Раньше метод молча ничего не делал и модалка оставалась открытой,
+                // из-за чего следующая вакансия обрабатывалась поверх чужой формы.
+                const still = document.querySelector('[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]');
+                if (still && this._isVisible(still)) {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+                    await this.wait(300);
+                }
             }
 
             // [FIX openResumeDropdown] Retry до 2 раз — на медленных страницах дропдаун не открывается с первого клика
@@ -817,7 +970,7 @@
                             cl.click();
                             await this.wait(600 + attempt * 400);
                             const dd = document.querySelector('[role="listbox"]');
-                            if (dd?.offsetParent) return true;
+                            if (this._isVisible(dd)) return true;
                         }
                     }
                 }
@@ -898,14 +1051,21 @@
                 const ta = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
                 if (ta) {
                     if (!this.settings.skipCoverLetter) {
+                        // [NEW] Подставляем название вакансии и компанию в шаблон
+                        const letter = this._renderCoverLetter(vacancyTitle || this.getVacancyTitleFromModal(), o);
                         const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-                        if (ns) { ns.call(ta, this.coverLetter); ta.dispatchEvent(new Event('input', { bubbles: true })); }
-                        else { ta.value = this.coverLetter; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+                        if (ns) { ns.call(ta, letter); ta.dispatchEvent(new Event('input', { bubbles: true })); }
+                        else { ta.value = letter; ta.dispatchEvent(new Event('input', { bubbles: true })); }
                         await this.wait(500);
                     }
                     return await this.submitResponse();
                 }
-                const al = document.querySelector('[data-qa="add-cover-letter"]');
+                // [FIX] В модалке письмо раскрывает data-qa="add-cover-letter", а на
+                // отдельной странице /applicant/vacancy_response — уже
+                // data-qa="vacancy-response-letter-toggle" («Сопроводительное письмо · Добавить»).
+                // Бот знал только первый вариант, поэтому на странице письмо не
+                // раскрывалось и отклик уходил вообще без сопроводительного.
+                const al = document.querySelector('[data-qa="add-cover-letter"], [data-qa="vacancy-response-letter-toggle"]');
                 if (al && !this.settings.skipCoverLetter) { al.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
                 const rl = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться'));
                 if (rl) { rl.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
@@ -942,7 +1102,7 @@
             findButtonByVacancyId(vacancyId) {
                 if (!vacancyId) return null;
                 for (const btn of document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')) {
-                    if (!btn.offsetParent || btn.style.display === 'none') continue;
+                    if (!this._isVisible(btn) || btn.style.display === 'none') continue;
                     if (this.getVacancyId(btn) === vacancyId) return btn;
                 }
                 return null;
@@ -976,17 +1136,15 @@
             getAvailableButtons() {
                 if (window.location.href.includes('/applicant/vacancy_response')) return [];
                 return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
-                    if (!b.offsetParent || b.style.display === 'none') return false;
+                    if (!this._isVisible(b) || b.style.display === 'none') return false;
                     if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
                     if (this.isFilteredOrganization(b)) return false;
+                    if (this.isFilteredTitle(b)) return false;
                     const vid = this.getVacancyId(b);
                     if (vid && this.skippedVacancies.has('id_' + vid)) return false;
                     const empId = this.getEmployerIdFromCard(b);
                     if (empId && this.testEmployerIds.has(String(empId))) return false;
-                    if (this.settings.skipResponded) {
-                        const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                        if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return false;
-                    }
+                    if (this.settings.skipResponded && this._isRespondedCard(b)) return false;
                     return true;
                 });
             }
@@ -1006,15 +1164,13 @@
                 const vacancyTitle = bot.getVacancyTitleFromCard(b);
 
                 // Быстрые фильтры (null = пропуск без счётчика ошибок)
-                if (!b.offsetParent || b.style.display === 'none') return null;
+                if (!bot._isVisible(b) || b.style.display === 'none') return null;
                 if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
                 if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (bot.isFilteredTitle(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
                 if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
-                if (bot.settings.skipResponded) {
-                    const _p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                    if (_p && ((_p.textContent || '').includes('Вы откликнулись') || _p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return null;
-                }
+                if (bot.settings.skipResponded && bot._isRespondedCard(b)) return null;
 
                 // Случайный пропуск 5% вакансий — имитирует поведение реального пользователя
                 if (Math.random() < 0.05) {
@@ -1036,8 +1192,10 @@
                 bot.updateStatus('Стр.' + bot.currentPage + ' | ' + (i + 1) + '/' + t + ' (' + _progressPct + '%) — ' + (o || 'Обработка...'));
 
                 let targetBtn = b;
-                if (!b.offsetParent) {
-                    if (vacancyId) targetBtn = bot.findButtonByVacancyId(vacancyId);
+                if (!bot._isVisible(b)) {
+                    // [FIX] Без vacancyId targetBtn оставался прежней — уже невидимой —
+                    // кнопкой, и бот кликал по элементу, которого нет на экране.
+                    targetBtn = vacancyId ? bot.findButtonByVacancyId(vacancyId) : null;
                     if (!targetBtn) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 }
 
@@ -1087,6 +1245,7 @@
                 if (ok) {
                     bot.consecutiveErrors = 0;
                     bot.stats.success++;
+                    bot._bumpDaily();
                     // [FIX] Добавляем в автофильтр после успешного отклика —
                     // раньше addToAutoFilter вызывался только для прямых откликов и тестов
                     if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
@@ -1105,17 +1264,21 @@
             }
 
             async _waitForModal(timeoutMs) {
+                // [FIX] Добавлен [role="dialog"][aria-modal="true"] — именно такую роль
+                // имеет форма отклика hh.ru (alertdialog используется только для алертов),
+                // а мёртвый vacancy-response-popup-close заменён на актуальный.
                 const selectors = [
                     '[data-qa="vacancy-response-submit-popup"]',
-                    '[data-qa="vacancy-response-popup-close"]',
+                    '[role="dialog"][aria-modal="true"]',
                     '[role="alertdialog"][aria-modal="true"]',
+                    '[data-qa="response-popup-close"]',
                     '[data-qa="vacancy-response-popup-form-letter-input"]'
                 ];
                 const start = Date.now();
                 while (Date.now() - start < timeoutMs) {
                     for (const sel of selectors) {
                         const el = document.querySelector(sel);
-                        if (el && el.offsetParent) return true;
+                        if (this._isVisible(el)) return true;
                     }
                     await this.wait(100);
                 }
@@ -1125,7 +1288,11 @@
             // [NEW] Уведомление через chrome.notifications при завершении
             async _sendNotification(title, message) {
                 try {
-                    chrome.runtime.sendMessage({ action: 'showNotification', title, message });
+                    // [FIX] sendMessage возвращает промис: если service worker спит или
+                    // расширение перезагружено, «Receiving end does not exist» всплывал
+                    // как unhandledrejection — try/catch вокруг синхронного вызова его не ловил.
+                    const r = chrome.runtime.sendMessage({ action: 'showNotification', title, message });
+                    if (r && typeof r.catch === 'function') r.catch(() => {});
                 } catch(e) {}
             }
 
@@ -1136,6 +1303,7 @@
                 if (window.location.href.includes('/applicant/vacancy_response')) { bot.updateStatus('Перейдите на страницу поиска'); return; }
                 bot.isRunning = true;
                 bot.consecutiveErrors = 0;
+                bot._lastErrorPauseAt = 0;
                 bot._logSessionStart();
                 const pageMatch = window.location.href.match(/[?&]page=(\d+)/);
                 bot.currentPage = pageMatch ? parseInt(pageMatch[1]) + 1 : 1;
@@ -1149,7 +1317,7 @@
 
                         if (!bt.length) {
                             const allBtns = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-                            const visibleBtns = Array.from(allBtns).filter(b => b.offsetParent && b.style.display !== 'none');
+                            const visibleBtns = Array.from(allBtns).filter(b => bot._isVisible(b) && b.style.display !== 'none');
                             if (allBtns.length > 0 && visibleBtns.length > 0) {
                                 bot.updateStatus('Стр.' + bot.currentPage + ' | Все ' + visibleBtns.length + ' отфильтрованы/пропущены');
                             } else {
@@ -1184,10 +1352,16 @@
                                 window.location.reload();
                                 return;
                             }
-                            if (bot.consecutiveErrors >= 3) {
+                            // [FIX] Счётчик обнулялся на трёх ошибках, поэтому до 8 он не
+                            // доходил никогда и ветка с перезагрузкой выше была мёртвой.
+                            // Теперь пауза делается на каждой третьей ошибке подряд,
+                            // а обнуляет счётчик только успешный отклик.
+                            if (bot.consecutiveErrors === 0) bot._lastErrorPauseAt = 0;
+                            if (bot.consecutiveErrors > 0 && bot.consecutiveErrors % 3 === 0 &&
+                                bot._lastErrorPauseAt !== bot.consecutiveErrors) {
+                                bot._lastErrorPauseAt = bot.consecutiveErrors;
                                 bot.updateStatus('⚠️ ' + bot.consecutiveErrors + ' ошибок подряд — пауза 30с...');
                                 await bot.wait(30000);
-                                bot.consecutiveErrors = 0;
                             }
                             if (_result !== null && i < bt.length - 1 && bot.isRunning) await bot.smartDelay();
                         }
@@ -1204,9 +1378,8 @@
                 const bot = window.hhAutoResponder || this;
                 const wasRunning = bot.isRunning;
                 bot.isRunning = false;
+                bot._lastErrorPauseAt = 0;
                 bot.updateControlButtons();
-                while (bot.iframeCheckQueue.length) { const cb = bot.iframeCheckQueue.shift(); if (typeof cb === 'function') cb(); }
-                bot.iframeCheckInProgress = false;
                 if (wasRunning) {
                     bot._logSessionEnd();
                     bot.updateStatus('Остановлено | Стр.' + bot.currentPage + ' ✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped);
@@ -1272,9 +1445,12 @@
                     this.updateStatus(e.target.checked ? 'Письмо ОТКЛЮЧЕНО' : 'Письмо ВКЛЮЧЕНО');
                 });
                 addListener($('hh-auto-select-resume'), 'change', e => { this.settings.autoSelectResume = e.target.checked; this.debouncedSave(); this.updateStatus(e.target.checked ? 'Автовыбор ВКЛЮЧЕН' : 'Автовыбор ВЫКЛЮЧЕН'); });
-                addListener($('hh-resume-matching'), 'input', e => { this.settings.resumeTitleMatching = parseInt(e.target.value); const mv = $('hh-matching-value'); if (mv) mv.textContent = this.settings.resumeTitleMatching + '%'; this.debouncedSave(); });
+                addListener($('hh-resume-matching'), 'input', e => { this.settings.resumeTitleMatching = clampNum(e.target.value, 0, 100, 70, true); const mv = $('hh-matching-value'); if (mv) mv.textContent = this.settings.resumeTitleMatching + '%'; this.debouncedSave(); });
                 addListener($('hh-auto-remember'), 'change', e => { this.settings.autoRememberOrganizations = e.target.checked; this.debouncedSave(); this.updateStatus(e.target.checked ? 'АВТОфильтр ВКЛЮЧЕН' : 'АВТОфильтр выключен'); });
                 addListener($('hh-letter'), 'input', e => {
+                    // [FIX] Счётчик обещает лимит 2000, но обрезки не было — hh.ru
+                    // отклонял отклик с длинным письмом, а бот считал это ошибкой.
+                    if (e.target.value.length > 2000) e.target.value = e.target.value.slice(0, 2000);
                     this.coverLetter = e.target.value;
                     const cc = $('hh-char-count'); if (cc) cc.textContent = e.target.value.length + '/2000';
                     clearTimeout(this._saveTimer);
@@ -1283,8 +1459,11 @@
                 addListener($('hh-auto-next'), 'change', e => { this.settings.autoNextPage = e.target.checked; this.debouncedSave(); });
                 addListener($('hh-skip-responded'), 'change', e => { this.settings.skipResponded = e.target.checked; this.debouncedSave(); });
                 addListener($('hh-filter-organizations'), 'change', e => { this.settings.filterOrganizations = e.target.checked; this.debouncedSave(); });
-                addListener($('hh-delay'), 'change', e => { this.settings.delay = parseFloat(e.target.value) || 0.5; this.debouncedSave(); });
+                // [FIX] min/max у input'а браузер не навязывает при ручном вводе —
+                // раньше сюда проходили и 100 секунд, и 0.001. Зажимаем и возвращаем в поле.
+                addListener($('hh-delay'), 'change', e => { this.settings.delay = clampNum(e.target.value, 0.3, 5, 0.5); e.target.value = this.settings.delay; this.debouncedSave(); });
                 addListener($('hh-filter-text'), 'input', e => { this.filteredOrganizations = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
+                addListener($('hh-title-stopwords'), 'input', e => { this.titleStopWords = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
                 // [NEW] Ночной режим
                 addListener($('hh-night-mode'), 'change', e => {
                     this.settings.nightModeEnabled = e.target.checked;
@@ -1293,8 +1472,8 @@
                     this.debouncedSave();
                     this.updateStatus(e.target.checked ? '\uD83C\uDF19 Ночной режим включён' : 'Ночной режим выключен');
                 });
-                addListener($('hh-night-from'), 'change', e => { this.settings.nightModeFrom = Math.min(23, Math.max(0, parseInt(e.target.value) || 23)); this.debouncedSave(); });
-                addListener($('hh-night-to'),   'change', e => { this.settings.nightModeTo   = Math.min(23, Math.max(0, parseInt(e.target.value) || 8));  this.debouncedSave(); });
+                addListener($('hh-night-from'), 'change', e => { this.settings.nightModeFrom = clampNum(e.target.value, 0, 23, 23, true); e.target.value = this.settings.nightModeFrom; this.debouncedSave(); });
+                addListener($('hh-night-to'),   'change', e => { this.settings.nightModeTo   = clampNum(e.target.value, 0, 23, 8,  true); e.target.value = this.settings.nightModeTo;   this.debouncedSave(); });
 
                 if (this._updateCountInterval) clearInterval(this._updateCountInterval);
                 this._updateCountInterval = setInterval(() => this.updateCount(), 5000);
@@ -1318,7 +1497,8 @@
             updateStatsDisplay() {
                 const el = document.getElementById('hh-stats');
                 if (!el) return;
-                el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped;
+                el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped
+                               + ' | 📅' + this._dailyCount() + '/200';
                 this.debouncedSave();
             }
 
@@ -1348,12 +1528,14 @@
                 bt.forEach((b, i) => {
                     const o = this.getOrganizationNameFromCard(b);
                     let reason = null;
-                    if (!b.offsetParent || b.style.display === 'none') {
+                    if (!this._isVisible(b) || b.style.display === 'none') {
                         reason = 'скрыта';
                     } else if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) {
                         reason = 'внешняя ссылка';
                     } else if (this.isFilteredOrganization(b)) {
                         reason = 'фильтр орг.';
+                    } else if (this.isFilteredTitle(b)) {
+                        reason = 'стоп-слово в названии';
                     } else {
                         const vid = this.getVacancyId(b);
                         if (vid && this.skippedVacancies.has('id_' + vid)) {
@@ -1362,11 +1544,8 @@
                             const empId = this.getEmployerIdFromCard(b);
                             if (empId && this.testEmployerIds.has(String(empId))) {
                                 reason = 'работодатель с тестом (id=' + empId + ')';
-                            } else if (this.settings.skipResponded) {
-                                const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                                if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) {
-                                    reason = 'уже откликнулись';
-                                }
+                            } else if (this.settings.skipResponded && this._isRespondedCard(b)) {
+                                reason = 'уже откликнулись';
                             }
                         }
                     }
@@ -1379,7 +1558,7 @@
 
             analyzePage() {
                 const all = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-                const visible = Array.from(all).filter(b => b.offsetParent && b.style.display !== 'none');
+                const visible = Array.from(all).filter(b => this._isVisible(b) && b.style.display !== 'none');
                 this.updateStatus('АНАЛИЗ:\nВсего кнопок: ' + all.length + '\nВидимых: ' + visible.length + '\nДоступно: ' + this.getAvailableButtons().length + '\nСтр. ' + this.currentPage + '\n\u2705' + this.stats.success + ' \u274C' + this.stats.failed + ' \u23ED\uFE0F' + this.stats.skipped);
             }
 
@@ -1389,8 +1568,11 @@
                 this.testEmployerIds.clear();
                 Store.remove(['hh-skipped-vacancies', 'hh-test-employers']);
                 this.stats = { success: 0, failed: 0, skipped: 0 };
+                // dailyStats НЕ сбрасываем: суточный лимит держит hh.ru, а не бот,
+                // и обнуление счётчика привело бы к отправке сверх лимита и ошибкам.
                 this.currentPage = 1;
                 this.consecutiveErrors = 0;
+                this._lastErrorPauseAt = 0;
                 this.updateStatsDisplay();
                 this.updateStatus('Всё очищено. Бот остановлен.');
             }
@@ -1399,8 +1581,13 @@
         if (!window.__HH_MSG_LISTENER__) {
             try {
                 chrome.runtime.onMessage.addListener((r, s, res) => {
-                    if (r.action === 'checkConnection') { res({ connected: !!window.hhAutoResponder || !!window.__hh_bot_instance__ }); }
-                    return true;
+                    if (r && r.action === 'checkConnection') {
+                        res({ connected: !!window.hhAutoResponder || !!window.__hh_bot_instance__ });
+                        return true;
+                    }
+                    // [FIX] Раньше true возвращался всегда: на любое другое сообщение
+                    // ответ не приходил, и канал у отправителя висел до сборки мусора.
+                    return false;
                 });
                 window.__HH_MSG_LISTENER__ = true;
             } catch(e) {}
@@ -1427,9 +1614,8 @@
             if (botInstance && !botInstance._reallyDestroyed) { botInstance.suspend(); botInstance.init(); checkAutoRestart(botInstance); return; }
             if (botInstance && typeof botInstance.destroy === 'function') botInstance.destroy();
             botInstance = new HHAutoResponder();
-            // [DEBUG] Экспорт только если явно включён флаг отладки —
-            // в обычном режиме window.hhAutoResponder не существует
-            if (sessionStorage.getItem('hh-debug') === '1') window.hhAutoResponder = botInstance;
+            // Конструктор уже публикует экземпляр в window ISOLATED-мира —
+            // отдельная ветка «только под флагом отладки» была no-op и вводила в заблуждение.
             checkAutoRestart(botInstance);
         }
 

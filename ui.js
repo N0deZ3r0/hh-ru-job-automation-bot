@@ -1,4 +1,4 @@
-// ===== HH AUTO RESPONDER v2.3 — UI (красивые звёзды) =====
+// ===== HH AUTO RESPONDER v2.4 — UI (красивые звёзды) =====
 (function() {
     'use strict';
 
@@ -57,6 +57,7 @@
             });
 
             const ar = bot.settingsCollapsed ? '\u25B6' : '\u25BC';
+            const botVersion = bot.version || '2.4';
             const safeCoverLetterLength = (bot.coverLetter || '').length;
             const safeMatching = safeNum(bot.settings.resumeTitleMatching, 70);
             const safeDelay = safeNum(bot.settings.delay, 1.5);
@@ -123,7 +124,7 @@
                     '.hhext-toggle:active .hhext-toggle-thumb { width: 24px; border-radius: 11px; }' +
                 '</style>' +
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:nowrap;">' +
-                    '<h3 style="margin:0;color:' + (isDark ? violet : violetDark) + ';font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v2.3 ' + (W ? '\uD83D\uDEE1\uFE0F' : '') + '</h3>' +
+                    '<h3 style="margin:0;color:' + (isDark ? violet : violetDark) + ';font-size:16px;white-space:nowrap;flex-shrink:0;min-width:fit-content;">HH Авто-отклик v' + escapeHtml(botVersion) + ' ' + (W ? '\uD83D\uDEE1\uFE0F' : '') + '</h3>' +
                     '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
                         '<span style="font-size:10px;color:' + violet + ';background:' + (isDark ? 'rgba(167,139,250,0.15)' : 'rgba(124,58,237,0.08)') + ';padding:3px 8px;border-radius:8px;font-weight:600;">' + (W ? 'WASM' : 'JS') + '</span>' +
                         '<div id="hh-theme-slider" class="hhext-toggle">' +
@@ -152,8 +153,8 @@
                             '<span style="color:' + (bot.settings.skipCoverLetter ? violet : st) + ';">\uD83D\uDEAB Не отправлять</span>' +
                         '</label>' +
                     '</div>' +
-                    '<textarea id="hh-letter" style="width:100%;height:100px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;' + (bot.settings.skipCoverLetter ? 'opacity:0.5;pointer-events:none;' : '') + '"></textarea>' +
-                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;display:flex;justify-content:space-between;"><span>* Укажите своё настоящее имя</span><span id="hh-char-count">' + safeCoverLetterLength + '/2000</span></div>' +
+                    '<textarea id="hh-letter" maxlength="2000" style="width:100%;height:100px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;' + (bot.settings.skipCoverLetter ? 'opacity:0.5;pointer-events:none;' : '') + '"></textarea>' +
+                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;display:flex;justify-content:space-between;gap:8px;"><span>* Своё имя. Подстановки: {вакансия}, {компания}</span><span id="hh-char-count">' + safeCoverLetterLength + '/2000</span></div>' +
                 '</div>' +
                 '<div style="margin-bottom:12px;">' +
                     '<div id="hh-settings-header" style="font-weight:bold;font-size:13px;margin:10px 0 5px 0;color:' + tc + ';cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;">' +
@@ -187,6 +188,11 @@
                     '<textarea id="hh-filter-text" style="width:100%;height:80px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;"></textarea>' +
                     '<div style="font-size:11px;color:' + st + ';margin-top:3px;">* Не откликаться на эти организации (полное или частичное совпадение)</div>' +
                 '</div>' +
+                '<div style="margin-bottom:12px;">' +
+                    '<div style="font-weight:bold;font-size:13px;margin-bottom:5px;color:' + tc + ';">\uD83D\uDD24 Стоп-слова в названии вакансии:</div>' +
+                    '<textarea id="hh-title-stopwords" style="width:100%;height:56px;padding:8px;border:1px solid ' + ib + ';border-radius:8px;font-size:13px;resize:vertical;background:' + ig + ';color:' + tc + ';box-sizing:border-box;"></textarea>' +
+                    '<div style="font-size:11px;color:' + st + ';margin-top:3px;">* Пропускать вакансии, в названии которых есть эти слова</div>' +
+                '</div>' +
                 '<div style="display:flex;flex-direction:column;gap:10px;margin:15px 0 10px;">' +
                     '<button id="hh-start" class="hhext-btn hhext-btn-start">\u25B6\uFE0F НАЧАТЬ АВТО-ОТКЛИК</button>' +
                     '<button id="hh-test" class="hhext-btn hhext-btn-test">\uD83E\uDDEA Тест на 1 вакансию</button>' +
@@ -201,7 +207,7 @@
                     '<button id="hh-clear" class="hhext-btn hhext-btn-action">\uD83D\uDDD1\uFE0F Очистить</button>' +
                     '<button id="hh-clear-auto-filter" class="hhext-btn hhext-btn-action" style="color:' + (isDark ? '#f87171' : '#ef4444') + ';">\uD83E\uDDF9 Автофильтр</button>' +
                 '</div>' +
-                '<div style="display:flex;gap:8px;margin-bottom:10px;"><button id="hh-export" class="hhext-btn hhext-btn-action">&#x1F4E4; Экспорт</button><button id="hh-import" class="hhext-btn hhext-btn-action">&#x1F4E5; Импорт</button><button id="hh-session-log" class="hhext-btn hhext-btn-action">&#x1F4CB; Лог</button></div><div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(bot.version || '2.3') + '</div>';
+                '<div style="display:flex;gap:8px;margin-bottom:10px;"><button id="hh-export" class="hhext-btn hhext-btn-action">&#x1F4E4; Экспорт</button><button id="hh-import" class="hhext-btn hhext-btn-action">&#x1F4E5; Импорт</button><button id="hh-session-log" class="hhext-btn hhext-btn-action">&#x1F4CB; Лог</button></div><div style="text-align:center;font-size:10px;color:' + st + ';border-top:1px solid ' + ib + ';padding-top:10px;margin-top:15px;">By ALEX \uD83D\uDEE1\uFE0F Tech Guard | WASM ' + (W ? '\u2705' : '\u26A0\uFE0F') + ' | v' + escapeHtml(botVersion) + '</div>';
 
             const letterEl = d.querySelector('#hh-letter');
             if (letterEl) letterEl.value = bot.coverLetter || '';
@@ -210,6 +216,12 @@
             if (filterEl) {
                 filterEl.value = (bot.filteredOrganizations || []).join(', ');
                 filterEl.placeholder = 'Введите названия организаций через запятую\nПример: Яндекс, Google';
+            }
+
+            const stopWordsEl = d.querySelector('#hh-title-stopwords');
+            if (stopWordsEl) {
+                stopWordsEl.value = (bot.titleStopWords || []).join(', ');
+                stopWordsEl.placeholder = 'Слова через запятую\nПример: стажёр, продажи, ночная смена';
             }
 
             // FIX: удаляем старую панель только после полного создания новой

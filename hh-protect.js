@@ -29,13 +29,16 @@
     // а после получения реальных данных перезаписываем их.
     if (!ID) {
         applyStubs();
-        setTimeout(function() {
+        // FIX: была ОДНА попытка через 100мс. Если background.js не успевал выполнить
+        // executeScript (а он гонится с document_start), защита не включалась вообще
+        // до конца жизни вкладки. Теперь опрашиваем до 2 секунд.
+        var _profileTries = 0;
+        var _pollProfile = function() {
             ID = window.__HH_PROFILE_DATA__;
-            if (!ID) {
-                return;
-            }
-            initProtection(ID);
-        }, 100);
+            if (ID) { initProtection(ID); return; }
+            if (++_profileTries < 40) setTimeout(_pollProfile, 50);
+        };
+        setTimeout(_pollProfile, 50);
         return;
     }
 
@@ -50,39 +53,72 @@
                 configurable: true
             });
         } catch(e) {}
-        try {
-            Object.defineProperty(Navigator.prototype, 'doNotTrack', {
-                get: function() { return '1'; },
-                configurable: true
-            });
-        } catch(e) {}
-        try {
-            Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {
-                get: function() { return 0; },
-                configurable: true
-            });
-        } catch(e) {}
-        // [NEW] UA/platform заглушки в окне 0-100мс до загрузки профиля
-        try {
-            Object.defineProperty(Navigator.prototype, 'userAgent', {
-                get: function() { return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'; },
-                configurable: true
-            });
-        } catch(e) {}
-        try {
-            Object.defineProperty(Navigator.prototype, 'platform', {
-                get: function() { return 'Win32'; },
-                configurable: true
-            });
-        } catch(e) {}
+        // [FIX] Заглушки userAgent/platform/doNotTrack УДАЛЕНЫ.
+        // Они подставляли зашитый Chrome/148 и Win32 в окне до прихода профиля,
+        // хотя расширение не переписывает исходящие заголовки — сервер всё это время
+        // видел настоящий User-Agent. Замер на живой машине: браузер Chrome 152,
+        // то есть заглушка сама создавала расхождение, которого иначе не было бы.
+        // doNotTrack:'1' тоже убран: в Chrome по умолчанию null (проверено),
+        // и единица не скрывает пользователя, а добавляет ему энтропии.
+        // Остаётся только webdriver — единственное, что действительно надо скрыть.
     }
 
     function initProtection(ID) {
 
+    // ── МАСКИРОВКА ПАТЧЕЙ ПОД NATIVE CODE ────────────────────────────────
+    // Объявлено в начале initProtection: _def ниже помечает свои геттеры сразу,
+    // а сам Function.prototype.toString патчится в конце функции.
+    var _nativeLookupSet = new WeakSet();
+    var _markNative = function(fn, name) {
+        if (typeof fn === 'function') {
+            _nativeLookupSet.add(fn);
+            try { Object.defineProperty(fn, 'name', { value: name || fn.name, configurable: true }); } catch(e) {}
+        }
+        return fn;
+    };
+
+    // ── ЗАГРУЗКА WASM В MAIN WORLD ───────────────────────────────────────
+    // core.js грузит WASM в ISOLATED world, но патчи отпечатка живут здесь,
+    // в MAIN world, и это разные window — дотянуться до того экземпляра нельзя.
+    // Синхронные API (measureText, getParameter, getChannelData) исключают мост
+    // через postMessage, поэтому модуль инстанцируется прямо тут.
+    // chrome.runtime в MAIN world нет, ссылки приходят в профиле.
+    // Glue грузится через new Function, а не тегом <script>: иначе var ProtectModule
+    // стал бы неудаляемым свойством window и сам выдавал бы расширение странице.
+    var _wasm = null;
+    function getWasm() {
+        if (_wasm) return _wasm;
+        try {
+            var w = window.__HH_WASM__;   // на случай, если модуль появится извне
+            return (w && typeof w.canvasNoise === 'function') ? w : null;
+        } catch(e) { return null; }
+    }
+
+    (function loadWasmIntoMainWorld() {
+        var glueUrl = ID.wasmGlueUrl, binUrl = ID.wasmBinaryUrl;
+        if (!glueUrl || !binUrl) return;
+        (async function() {
+            try {
+                // Загрузчик выполняется внутри new Function: объявление
+                // HHProtectWasm остаётся локальным и не попадает в window,
+                // иначе страница увидела бы его и опознала расширение.
+                var src = await (await fetch(glueUrl)).text();
+                var loader = new Function(src + '\nreturn HHProtectWasm;')();
+                _wasm = await loader.load(binUrl);
+            } catch(e) {
+                // CSP, недоступный ресурс, что угодно — остаёмся на JS-фолбэках
+            }
+        })();
+    })();
+
     function _def(obj, prop, value) {
         try {
+            // FIX: геттер помечаем как native. Раньше
+            // Object.getOwnPropertyDescriptor(Navigator.prototype,'userAgent').get.toString()
+            // возвращал "function() { return value; }" — подмена палилась одной строкой.
+            var getter = _markNative(function() { return value; }, 'get ' + prop);
             Object.defineProperty(obj, prop, {
-                get: function() { return value; },
+                get: getter,
                 configurable: true,
                 enumerable: true
             });
@@ -90,17 +126,26 @@
     }
 
     // ===== DEVICE PIXEL RATIO =====
-    try {
-        Object.defineProperty(window, 'devicePixelRatio', {
-            get: function() { return ID.devicePixelRatio || 1; },
-            configurable: true
-        });
-    } catch(e) {}
+    // [FIX] Патчим только если профиль реально задаёт значение. Раньше DPR
+    // безусловно прибивался к 1, а медиазапрос (resolution: Ndppx) не трогался —
+    // на экране с DPR 1.25 получалось прямое противоречие.
+    if (ID.devicePixelRatio) {
+        try {
+            Object.defineProperty(window, 'devicePixelRatio', {
+                get: _markNative(function() { return ID.devicePixelRatio; }, 'get devicePixelRatio'),
+                configurable: true
+            });
+        } catch(e) {}
+    }
 
     // ===== TIMEZONE =====
     // [FIX Intl.DateTimeFormat] Копируем статические методы и правильно
     // выстраиваем цепочку прототипов через Object.setPrototypeOf.
-    if (ID.timezone) {
+    // [FIX] Ставим патч только если зона профиля отличается от настоящей —
+    // иначе это лишний слой поверх Intl без единого изменённого значения.
+    var _realTZ = null;
+    try { _realTZ = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e) {}
+    if (ID.timezone && ID.timezone !== _realTZ) {
         try {
             var OrigDTF = Intl.DateTimeFormat;
             var PatchedDTF = function(loc, opts) {
@@ -147,25 +192,70 @@
         // чтобы applyCanvasNoise работал с чистыми пикселями.
         var origGID = CanvasRenderingContext2D.prototype.getImageData;
 
-        var wasm = null;
-        try {
-            wasm = window.__HH_WASM__;
-        } catch(e) {}
+        // [FIX подмена контекста] applyCanvasNoise вызывает canvas.getContext('2d').
+        // На холсте без контекста этот вызов СОЗДАЁТ 2d-контекст, после чего
+        // getContext('webgl') на том же холсте навсегда возвращает null — страница
+        // теряет WebGL. Запоминаем, у каких холстов 2d-контекст уже есть,
+        // и шумим только их.
+        var _has2d = new WeakSet();
+        var _origGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type) {
+            var c = _origGetContext.apply(this, arguments);
+            if (c && (type === '2d' || type === 'experimental-2d')) _has2d.add(this);
+            return c;
+        };
+
+        // Сид стабилен в пределах сессии: один и тот же canvas даёт один и тот же
+        // отпечаток при повторных чтениях, но разный между сессиями.
+        var _canvasSeed = (function() {
+            if (_NativeGetRandValues) {
+                var b = new Uint32Array(1);
+                _NativeGetRandValues(b);
+                return b[0] || 1;
+            }
+            return ((Math.random() * 0xFFFFFFFF) >>> 0) || 1;
+        })();
+
+        function jsCanvasNoise(imageData) {
+            var d = imageData.data, seed = _canvasSeed;
+            for (var i = 0; i < d.length; i += 4) {
+                seed = (seed * 1664525 + 1013904223) >>> 0;
+                var ch = (seed >>> 28) & 3;          // 3 = пропустить пиксель
+                if (ch > 2) continue;
+                // Uint8ClampedArray сам обрезает выход за 0..255
+                d[i + ch] += ((seed >>> 27) & 1) ? 1 : -1;
+            }
+        }
 
         // [FIX накопительный шум] Используем offscreen-canvas как буфер:
         // читаем пиксели оригинала через нативный getImageData (не через патч),
         // добавляем шум в копию, записываем копию обратно. Оригинальные данные
         // не мутируются многократно — каждый вызов получает свежую копию.
         function applyCanvasNoise(canvas) {
-            if (!wasm || !wasm.addCanvasNoise) return false;
-            if (wasm.shouldSkipCanvasNoise && wasm.shouldSkipCanvasNoise(canvas.width, canvas.height)) return false;
+            if (!canvas || !canvas.width || !canvas.height) return false;
+            var wasm = getWasm();
+            // Решение о том, шуметь ли холст, принимает модуль: should_noise_canvas
+            // шумит всё до мегапикселя и пропускает крупные холсты со страничной
+            // графикой. В прежнем бинарнике эта эвристика была вывернута наизнанку
+            // (пропускала 200x60 и шумела 1920x1080), поэтому её приходилось
+            // обходить; в wasm/protect.wat она переписана и проверена тестами.
+            if (wasm && wasm.shouldNoiseCanvas) {
+                if (!wasm.shouldNoiseCanvas(canvas.width, canvas.height)) return false;
+            } else if (canvas.width * canvas.height > 1048576) {
+                return false;   // то же правило для JS-фолбэка
+            }
 
+            if (!_has2d.has(canvas)) return false;
             try {
-                var ctx = canvas.getContext('2d');
+                var ctx = _origGetContext.call(canvas, '2d');
                 if (!ctx) return false;
                 // Используем сохранённый оригинал — не проходим через патч getImageData
                 var imageData = origGID.call(ctx, 0, 0, canvas.width, canvas.height);
-                wasm.addCanvasNoise(imageData);
+                if (wasm) {
+                    try { wasm.canvasNoise(imageData); } catch(e) { jsCanvasNoise(imageData); }
+                } else {
+                    jsCanvasNoise(imageData);
+                }
                 ctx.putImageData(imageData, 0, 0);
                 return true;
             } catch(e) {
@@ -221,8 +311,10 @@
                 }
                 blobPending.set(this, true);
 
-                if (this.width > 0 && this.height > 0) {
-                    applyCanvasNoise(this);
+                // [FIX noise once] Тот же WeakSet, что и в toDataURL: без него
+                // повторные toBlob накапливали шум на одном и том же холсте.
+                if (this.width > 0 && this.height > 0 && !noiseApplied.has(this)) {
+                    if (applyCanvasNoise(this)) noiseApplied.add(this);
                 }
 
                 // [FIX this в колбэке] Сохраняем явную ссылку вместо .bind()
@@ -276,6 +368,70 @@
         }
     })();
 
+    // ===== TEXT METRICS (WASM) =====
+    // Перечисление шрифтов делают не через document.fonts.check, а измеряя ширину
+    // строки в разных гарнитурах. Замер на живой машине: Arial 936.92, Wingdings
+    // 1046.84, Impact 832.08 — набор установленных шрифтов читался полностью,
+    // потому что measureText никто не трогал.
+    // substitute_text_width из WASM даёт детерминированный сдвиг ~0.0001-0.013%:
+    // вёрстку это не двигает, а таблицу ширин делает уникальной для профиля.
+    try {
+        var _origMeasureText = CanvasRenderingContext2D.prototype.measureText;
+        // Кеш держит значение стабильным в пределах сессии: повторное измерение
+        // той же строки тем же шрифтом обязано давать тот же результат.
+        var _twCache = new Map();
+        CanvasRenderingContext2D.prototype.measureText = function(text) {
+            var tm = _origMeasureText.call(this, text);
+            var w = getWasm();
+            if (!w || !w.textWidth) return tm;
+            try {
+                var key = this.font + '\u0000' + String(text);
+                var val = _twCache.get(key);
+                if (val === undefined) {
+                    val = w.textWidth(tm.width, String(text));
+                    if (_twCache.size > 500) _twCache.clear();
+                    _twCache.set(key, val);
+                }
+                // Подменяем width на самом объекте TextMetrics — instanceof и
+                // остальные поля остаются нативными.
+                Object.defineProperty(tm, 'width', { value: val, configurable: true, enumerable: true });
+            } catch(e) {}
+            return tm;
+        };
+    } catch(e) {}
+
+    // ===== AUDIO (WASM) =====
+    // Классический аудио-отпечаток: OfflineAudioContext + DynamicsCompressor,
+    // затем сумма отрендеренного буфера. Замер на живой машине давал стабильные
+    // 1079.88727944 — значение снималось без каких-либо помех.
+    // add_audio_noise сдвигает отсчёты примерно на 2e-5 (около -94 дБ) — неслышимо.
+    try {
+        var _audioNoised = new WeakSet();
+        var AUDIO_INTENSITY = 0.0001;
+        if (typeof AudioBuffer !== 'undefined' && AudioBuffer.prototype.getChannelData) {
+            var _origGetChannelData = AudioBuffer.prototype.getChannelData;
+            AudioBuffer.prototype.getChannelData = function(channel) {
+                var data = _origGetChannelData.call(this, channel);
+                var w = getWasm();
+                if (w && w.audioNoise && data && !_audioNoised.has(data)) {
+                    _audioNoised.add(data);
+                    try { w.audioNoise(data, AUDIO_INTENSITY); } catch(e) {}
+                }
+                return data;
+            };
+        }
+        if (typeof AnalyserNode !== 'undefined' && AnalyserNode.prototype.getFloatFrequencyData) {
+            var _origGFFD = AnalyserNode.prototype.getFloatFrequencyData;
+            AnalyserNode.prototype.getFloatFrequencyData = function(array) {
+                _origGFFD.call(this, array);
+                var w = getWasm();
+                if (w && w.audioNoise && array) {
+                    try { w.audioNoise(array, AUDIO_INTENSITY); } catch(e) {}
+                }
+            };
+        }
+    } catch(e) {}
+
     // ===== WEBGL =====
     try {
         var g1 = WebGLRenderingContext.prototype;
@@ -283,40 +439,59 @@
         g1.getParameter = function(p) {
             if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
             if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+            // MAX_TEXTURE_MAX_ANISOTROPY_EXT — тоже часть отпечатка GPU
+            if (p === 0x84FF) {
+                var w = getWasm();
+                if (w && w.maxAnisotropy) { try { return w.maxAnisotropy(); } catch(e) {} }
+            }
             if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
             try { return origGP1.call(this, p); } catch(e) { return null; }
         };
 
-        var origGSE = g1.getSupportedExtensions;
-        g1.getSupportedExtensions = function() {
-            var exts = origGSE.call(this);
-            return exts.filter(function(e) { return e !== 'WEBGL_debug_renderer_info'; });
-        };
+        // [FIX противоречие] Прежний код прятал WEBGL_debug_renderer_info из
+        // getSupportedExtensions и возвращал null из getExtension — но getParameter
+        // при этом продолжал отвечать на 0x9245/0x9246. Настоящий Chrome так не умеет:
+        // проверено, расширение поддерживается и getExtension отдаёт объект.
+        // Такая пара «расширения нет, но параметры его есть» — готовый маркер.
+        // Оставляем расширение на месте, подменяя только сами значения.
 
-        var origGE = g1.getExtension;
-        g1.getExtension = function(n) {
-            if (n === 'WEBGL_debug_renderer_info') return null;
-            return origGE.call(this, n);
-        };
+        // [NEW] Точность шейдеров — ещё один параметр железа в отпечатке.
+        // Прежний модуль писал сюда 23/23/0 (precision=0 означает «не
+        // поддерживается» и ломало бы страницы), поэтому патч не ставился.
+        // Новый возвращает значения настоящего Chrome: float 127/127/23,
+        // int 31/30/0 — они одинаковы на всех десктопных GPU, так что
+        // подмена нормализует машины с нестандартным железом.
+        function _patchShaderPrecision(proto) {
+            var orig = proto.getShaderPrecisionFormat;
+            if (!orig) return;
+            proto.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                var real = orig.call(this, shaderType, precisionType);
+                var w = getWasm();
+                if (!w || !w.shaderPrecision || !real) return real;
+                try {
+                    var f = w.shaderPrecision(precisionType);
+                    Object.defineProperty(real, 'rangeMin',  { value: f.rangeMin,  configurable: true });
+                    Object.defineProperty(real, 'rangeMax',  { value: f.rangeMax,  configurable: true });
+                    Object.defineProperty(real, 'precision', { value: f.precision, configurable: true });
+                } catch(e) {}
+                return real;
+            };
+        }
+        _patchShaderPrecision(g1);
 
         if (typeof WebGL2RenderingContext !== 'undefined') {
             var g2 = WebGL2RenderingContext.prototype;
+            _patchShaderPrecision(g2);
             var origGP2 = g2.getParameter;
             g2.getParameter = function(p) {
                 if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
                 if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+                if (p === 0x84FF) {
+                    var w = getWasm();
+                    if (w && w.maxAnisotropy) { try { return w.maxAnisotropy(); } catch(e) {} }
+                }
                 if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
                 return origGP2.call(this, p);
-            };
-            var origGSE2 = g2.getSupportedExtensions;
-            g2.getSupportedExtensions = function() {
-                var exts = origGSE2.call(this);
-                return exts.filter(function(e) { return e !== 'WEBGL_debug_renderer_info'; });
-            };
-            var origGE2 = g2.getExtension;
-            g2.getExtension = function(n) {
-                if (n === 'WEBGL_debug_renderer_info') return null;
-                return origGE2.call(this, n);
             };
         }
     } catch(e) {}
@@ -332,36 +507,52 @@
     }
 
     // ===== NAVIGATOR =====
+    // [FIX лишние патчи] Каждый подменённый геттер — это поверхность для детекта,
+    // поэтому ставим его только там, где значение действительно меняется.
+    // Замер на живой машине: vendor, maxTouchPoints, pdfViewerEnabled и webdriver
+    // и так совпадали с профилем — четыре патча стояли впустую.
+    function _defIfDiff(obj, prop, value, real) {
+        if (value === undefined || value === null) return;
+        var same = Array.isArray(value)
+            ? JSON.stringify(value) === JSON.stringify(Array.from(real || []))
+            : String(value) === String(real);
+        if (same) return;
+        _def(obj, prop, value);
+    }
+
     try {
         var np = Navigator.prototype;
-        if (ID.platform) _def(np, 'platform', ID.platform);
-        if (ID.hwConcurrency) _def(np, 'hardwareConcurrency', ID.hwConcurrency);
-        if (ID.deviceMemory) _def(np, 'deviceMemory', ID.deviceMemory);
-        _def(np, 'webdriver', ID.webdriver);
-        if (ID.vendor) _def(np, 'vendor', ID.vendor);
-        if (ID.language) _def(np, 'language', ID.language);
-        if (ID.languages) _def(np, 'languages', ID.languages);
+        _defIfDiff(np, 'platform', ID.platform, navigator.platform);
+        _defIfDiff(np, 'hardwareConcurrency', ID.hwConcurrency, navigator.hardwareConcurrency);
+        _defIfDiff(np, 'deviceMemory', ID.deviceMemory, navigator.deviceMemory);
+        _defIfDiff(np, 'vendor', ID.vendor, navigator.vendor);
+        _defIfDiff(np, 'language', ID.language, navigator.language);
+        _defIfDiff(np, 'languages', ID.languages, navigator.languages);
         if (ID.userAgent) {
-            _def(np, 'userAgent', ID.userAgent);
-            // [FIX appVersion] Приоритет явному полю из профиля (background.js уже формирует
-            // его корректно без "Mozilla/"). Fallback — вычисление на месте.
-            _def(np, 'appVersion', ID.appVersion || ID.userAgent.replace(/^Mozilla\//, ''));
+            _defIfDiff(np, 'userAgent', ID.userAgent, navigator.userAgent);
+            _defIfDiff(np, 'appVersion', ID.appVersion || ID.userAgent.replace(/^Mozilla\//, ''), navigator.appVersion);
         }
-        _def(np, 'maxTouchPoints', 0);
-        _def(np, 'doNotTrack', '1');
-        _def(np, 'pdfViewerEnabled', true);
+        // webdriver — единственное, что скрываем всегда: true выдаёт автоматизацию
+        if (navigator.webdriver !== false) _def(np, 'webdriver', false);
 
-        // [FIX лишний аргумент] Убран 4-й аргумент false — _def принимает только 3
-        try { _def(np, 'bluetooth', undefined); } catch(e) {}
-        try { _def(np, 'usb', undefined); } catch(e) {}
-        try { _def(np, 'serial', undefined); } catch(e) {}
-        try { _def(np, 'hid', undefined); } catch(e) {}
+        // [FIX] Убраны patch'и doNotTrack='1' и обнуление bluetooth/usb/serial/hid.
+        // В настоящем Chrome doNotTrack === null, а navigator.bluetooth и соседи —
+        // живые объекты (проверено). Прежний код оставлял ключ в navigator, но отдавал
+        // undefined — состояние, которого у настоящего браузера не бывает вообще.
     } catch(e) {}
 
     // ===== CLIENT HINTS =====
     try {
         var uad = navigator.userAgentData;
-        if (uad && ID.clientHints) {
+        // [FIX] Если профиль повторяет реальные бренды и платформу — не патчим вовсе.
+        var _chDiffers = false;
+        try {
+            _chDiffers = !!(ID.clientHints && (
+                JSON.stringify(ID.clientHints.brands || null) !== JSON.stringify(uad ? uad.brands : null) ||
+                (ID.clientHints.platform && ID.clientHints.platform !== (uad && uad.platform))
+            ));
+        } catch(e) { _chDiffers = true; }
+        if (uad && ID.clientHints && _chDiffers) {
             var ch = ID.clientHints;
             if (ch.brands) _def(uad, 'brands', ch.brands);
             if (ch.platform) _def(uad, 'platform', ch.platform);
@@ -506,32 +697,38 @@
     } catch(e) {}
 
     // ===== MATCH MEDIA =====
-    // [FIX matchMedia] Обрабатываем все четыре варианта (min/max × width/height)
-    // на основе реальных значений из профиля, а не замены на 9999px.
-    // Это устраняет детектируемое несоответствие между screen.width и matchMedia.
+    // [FIX matchMedia] Подменяем ТОЛЬКО device-width/device-height.
+    // Раньше переписывались min-width/max-width — а это размер ВЬЮПОРТА, а не экрана:
+    // в неразвёрнутом окне (скажем, 900px на экране 1920px) все медиазапросы hh.ru
+    // отвечали как для 1920px, и вёрстка ехала. Заодно это создавало ровно то
+    // несоответствие (innerWidth против matchMedia), которое патч должен был убирать.
     try {
         var origMM = window.matchMedia.bind(window);
         window.matchMedia = function(query) {
-            if (!ID.screenWidth) return origMM(query);
-            if (!query.includes('width') && !query.includes('height')) return origMM(query);
+            if (!ID.screenWidth || typeof query !== 'string') return origMM(query);
+            if (query.indexOf('device-width') === -1 && query.indexOf('device-height') === -1) {
+                return origMM(query);
+            }
 
             var w = ID.screenWidth;
             var h = ID.screenHeight || ID.screenWidth;
+            // Имя фичи сохраняем, подменяем только порог: 1px истинно для любого
+            // реального экрана, 99999px — ложно. Так ответ соответствует профилю.
             var fakeQuery = query
-                .replace(/min-width:\s*(\d+)px/g, function(_, v) {
-                    return 'min-width: ' + (w >= parseInt(v) ? '1px' : '99999px');
+                .replace(/min-device-width:\s*(\d+)px/g, function(_, v) {
+                    return 'min-device-width: ' + (w >= parseInt(v, 10) ? '1px' : '99999px');
                 })
-                .replace(/max-width:\s*(\d+)px/g, function(_, v) {
-                    return 'max-width: ' + (w <= parseInt(v) ? '99999px' : '1px');
+                .replace(/max-device-width:\s*(\d+)px/g, function(_, v) {
+                    return 'max-device-width: ' + (w <= parseInt(v, 10) ? '99999px' : '1px');
                 })
-                .replace(/min-height:\s*(\d+)px/g, function(_, v) {
-                    return 'min-height: ' + (h >= parseInt(v) ? '1px' : '99999px');
+                .replace(/min-device-height:\s*(\d+)px/g, function(_, v) {
+                    return 'min-device-height: ' + (h >= parseInt(v, 10) ? '1px' : '99999px');
                 })
-                .replace(/max-height:\s*(\d+)px/g, function(_, v) {
-                    return 'max-height: ' + (h <= parseInt(v) ? '99999px' : '1px');
+                .replace(/max-device-height:\s*(\d+)px/g, function(_, v) {
+                    return 'max-device-height: ' + (h <= parseInt(v, 10) ? '99999px' : '1px');
                 });
 
-            return origMM(fakeQuery !== query ? fakeQuery : query);
+            return origMM(fakeQuery);
         };
     } catch(e) {}
 
@@ -567,10 +764,18 @@
         // Патчим через value — одна функция, стабильная ссылка.
         // [FIX монотонность] Храним последнее возвращённое значение —
         // performance.now() обязан быть монотонным, иначе детектируется.
+        // [FIX сетка] Chrome квантует performance.now() до 0.1 мс и внутри одного
+        // тика возвращает ОДНО И ТО ЖЕ значение. Замер на живой машине:
+        // 200 подряд вызовов → 1 уникальное значение, все 200 на сетке 0.1.
+        // Прежний патч выдавал строго возрастающие значения с шагом 0.001 — то есть
+        // и вне сетки, и без повторов. Тривиальная проверка `performance.now() ===
+        // performance.now()` разоблачала его мгновенно, и патч делал браузер
+        // ЗАМЕТНЕЕ, чем полное отсутствие защиты. Теперь джиттер округляется
+        // обратно на сетку, а повторы разрешены (сравнение `<`, а не `<=`).
         var _lastPerfValue = 0;
         var _patchedPerfNow = function() {
-            var v = _origPerfNow() + _nextNoise();
-            if (v <= _lastPerfValue) v = _lastPerfValue + 0.001;
+            var v = Math.round((_origPerfNow() + _nextNoise()) * 10) / 10;
+            if (v < _lastPerfValue) v = _lastPerfValue;
             _lastPerfValue = v;
             return v;
         };
@@ -585,8 +790,15 @@
         }
 
         // [FIX native capture] _NativeDateNow захвачен в начале IIFE — гарантированно нативный
+        // [FIX монотонность] Шум "+1 или +0" мог дать значение МЕНЬШЕ предыдущего
+        // (сначала +1, потом +0) — отрицательные дельты ломают замеры времени
+        // на странице и сами по себе детектируются. Держим неубывающую последовательность.
+        var _lastDateValue = 0;
         var _patchedDateNow = function() {
-            return _NativeDateNow() + (_nextNoise() > 0.05 ? 1 : 0);
+            var v = _NativeDateNow() + (_nextNoise() > 0.05 ? 1 : 0);
+            if (v < _lastDateValue) v = _lastDateValue;
+            _lastDateValue = v;
+            return v;
         };
 
         // Патчим через defineProperty — устойчиво к перезаписи
@@ -602,11 +814,13 @@
 
         // Date constructor — new Date() для точных временны́х меток
         var _OrigDate = _NativeDate || Date;
+        // [FIX Date без new] По спецификации Date() без new возвращает СТРОКУ.
+        // Старый шим отдавал объект Date — и ломал код вида ('' + Date()), и палился.
+        // [FIX new.target] Reflect.construct сохраняет new.target, поэтому
+        // `class X extends Date` продолжает работать.
         window.Date = function() {
-            if (arguments.length === 0) {
-                return new _OrigDate();
-            }
-            return new (Function.prototype.bind.apply(_OrigDate, [null].concat(Array.from(arguments))))();
+            if (!new.target) return String(new _OrigDate());
+            return Reflect.construct(_OrigDate, arguments, new.target);
         };
         // [FIX Date.now self-ref] Присваиваем _patchedDateNow напрямую
         window.Date.now = _patchedDateNow;
@@ -614,6 +828,13 @@
         window.Date.UTC = _OrigDate.UTC;
         Object.setPrototypeOf(window.Date, _OrigDate);
         window.Date.prototype = _OrigDate.prototype;
+        // [FIX constructor] Без этого (new Date()).constructor !== Date — тривиальный
+        // маркер подмены. prototype общий с оригиналом, так что правка согласована.
+        try {
+            Object.defineProperty(_OrigDate.prototype, 'constructor', {
+                value: window.Date, writable: true, configurable: true
+            });
+        } catch(e) {}
     } catch(e) {}
 
 
@@ -692,21 +913,19 @@
     // ===== FUNCTION.PROTOTYPE.TOSTRING =====
     // Самая важная защита — патченые функции выглядят нативными через .toString()
     try {
-        var _nativeLookupSet = new WeakSet();
+        // _nativeLookupSet и _markNative объявлены в начале initProtection —
+        // _def помечает свои геттеры ещё до того, как мы доберёмся сюда.
         var _origFnToString = Function.prototype.toString;
-        var _markNative = function(fn, name) {
-            if (typeof fn === 'function') {
-                _nativeLookupSet.add(fn);
-                try { Object.defineProperty(fn, 'name', { value: name || fn.name, configurable: true }); } catch(e) {}
-            }
-            return fn;
-        };
         Function.prototype.toString = function() {
             if (_nativeLookupSet.has(this)) return 'function ' + (this.name || '') + '() { [native code] }';
             return _origFnToString.call(this);
         };
         _nativeLookupSet.add(Function.prototype.toString);
         _markNative(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
+        _markNative(HTMLCanvasElement.prototype.getContext, 'getContext');
+        try { _markNative(CanvasRenderingContext2D.prototype.measureText, 'measureText'); } catch(e) {}
+        try { if (typeof AudioBuffer !== 'undefined') _markNative(AudioBuffer.prototype.getChannelData, 'getChannelData'); } catch(e) {}
+        try { if (typeof AnalyserNode !== 'undefined') _markNative(AnalyserNode.prototype.getFloatFrequencyData, 'getFloatFrequencyData'); } catch(e) {}
         _markNative(HTMLCanvasElement.prototype.toBlob, 'toBlob');
         if (CanvasRenderingContext2D.prototype.getImageData) _markNative(CanvasRenderingContext2D.prototype.getImageData, 'getImageData');
         if (window.matchMedia) _markNative(window.matchMedia, 'matchMedia');
@@ -716,6 +935,19 @@
         if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) _markNative(navigator.mediaDevices.enumerateDevices, 'enumerateDevices');
         if (WebGLRenderingContext.prototype.getParameter) _markNative(WebGLRenderingContext.prototype.getParameter, 'getParameter');
         if (WebGLRenderingContext.prototype.getSupportedExtensions) _markNative(WebGLRenderingContext.prototype.getSupportedExtensions, 'getSupportedExtensions');
+        // FIX: раньше не помечались — WebGL2, шрифты, Intl и Date выдавали подмену
+        if (typeof WebGL2RenderingContext !== 'undefined') {
+            _markNative(WebGL2RenderingContext.prototype.getParameter, 'getParameter');
+            _markNative(WebGL2RenderingContext.prototype.getSupportedExtensions, 'getSupportedExtensions');
+            _markNative(WebGL2RenderingContext.prototype.getExtension, 'getExtension');
+        }
+        _markNative(WebGLRenderingContext.prototype.getExtension, 'getExtension');
+        try { if (document.fonts && document.fonts.check) _markNative(document.fonts.check, 'check'); } catch(e) {}
+        try { _markNative(window.Date, 'Date'); } catch(e) {}
+        try { _markNative(Intl.DateTimeFormat, 'DateTimeFormat'); } catch(e) {}
+        try { _markNative(Intl.DateTimeFormat.prototype.resolvedOptions, 'resolvedOptions'); } catch(e) {}
+        try { _markNative(WebGLRenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
+        try { if (typeof WebGL2RenderingContext !== 'undefined') _markNative(WebGL2RenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
     } catch(e) {}
 
     } // конец функции initProtection
