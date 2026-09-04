@@ -80,7 +80,7 @@ var HHProtectWasm = (function () {
 
     // wasmUrl — абсолютный адрес protect.wasm. В ISOLATED world его даёт
     // chrome.runtime.getURL, в MAIN world он приходит в профиле от background.js.
-    async function load(wasmUrl) {
+    async function load(wasmUrl, seedPair) {
         var instance;
         try {
             // instantiateStreaming требует Content-Type application/wasm;
@@ -92,11 +92,19 @@ var HHProtectWasm = (function () {
             instance = (await WebAssembly.instantiate(bytes, {})).instance;
         }
 
-        // Сид сессии: без него шум был бы одинаковым у всех пользователей
-        // и сам стал бы признаком расширения.
-        var s = new Uint32Array(2);
-        (typeof crypto !== 'undefined' ? crypto : self.crypto).getRandomValues(s);
-        instance.exports.seed(s[0] | 1, s[1] || 0x6D2B79F5);
+        // [FIX] Сид приходит СНАРУЖИ и постоянен для установки. Раньше он брался
+        // из getRandomValues на каждой загрузке — отпечаток канваса менялся при
+        // каждом заходе, что само по себе выдаёт автоматизацию. Случайный сид
+        // остаётся лишь аварийным вариантом, если вызывающий его не передал.
+        var a, b;
+        if (seedPair && typeof seedPair[0] === 'number' && typeof seedPair[1] === 'number') {
+            a = seedPair[0] >>> 0; b = seedPair[1] >>> 0;
+        } else {
+            var s = new Uint32Array(2);
+            (typeof crypto !== 'undefined' ? crypto : self.crypto).getRandomValues(s);
+            a = s[0]; b = s[1];
+        }
+        instance.exports.seed(a | 1, b || 0x6D2B79F5);
 
         return wrap(instance);
     }

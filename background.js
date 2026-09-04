@@ -38,6 +38,7 @@ function getRandomGPU() {
 }
 
 let DEFAULT_PROFILE = null;
+let NOISE_SEED = null;
 let initializationPromise = null;
 
 // [FIX рассогласование с заголовками] Раньше профиль был зашит константами:
@@ -120,6 +121,9 @@ function buildProfile(selectedGPU, env) {
         // Адреса WASM для MAIN world. chrome.runtime там недоступен, поэтому
         // ссылки передаются через профиль — иначе hh-protect.js не может
         // загрузить protect.wasm и остаётся на JS-фолбэках.
+        // Постоянный сид шума — одинаковый для всех загрузок этой установки.
+        noiseSeed: NOISE_SEED,
+
         wasmGlueUrl: chrome.runtime.getURL('protect.js'),
         wasmBinaryUrl: chrome.runtime.getURL('protect.wasm'),
 
@@ -143,8 +147,34 @@ async function initialize(forceNewGpu) {
                 languages: [], timezone: null, clientHints: null };
     }
     try {
-        const result = forceNewGpu ? {} : await chrome.storage.local.get(['hh_selected_gpu']);
+        // [FIX] Сид шума читаем ВСЕГДА, даже когда перевыбираем видеокарту.
+        // Прежний вариант при forceNewGpu подставлял пустой объект — и на
+        // свежей установке (а reload распакованного расширения даёт reason
+        // 'install') сид генерировался заново. Отпечаток из-за этого продолжал
+        // меняться: 8773a92a38b95a40 -> fb78dae350c62bdf. Видеокарту перевыбирать
+        // при переустановке нормально, отпечаток канваса — нет.
+        const seedStore = await chrome.storage.local.get(['hh_noise_seed']);
+        const result = forceNewGpu
+            ? { hh_noise_seed: seedStore.hh_noise_seed }
+            : await chrome.storage.local.get(['hh_selected_gpu', 'hh_noise_seed']);
         let selectedGPU;
+
+        // [FIX плавающий отпечаток] Сид шума канваса генерировался заново на КАЖДОЙ
+        // загрузке страницы, поэтому canvas-отпечаток менялся каждый раз. Замер на
+        // живой машине: 729d514c449a8f8a -> 8773a92a38b95a40 между сессиями.
+        // У настоящего пользователя отпечаток стабилен месяцами, а плавающий —
+        // маркер автоматизации куда более явный, чем отсутствие защиты вообще.
+        // hh.ru эти данные собирает: fingerprintSp уходит и в телеметрии, и вместе
+        // с поднятием резюме (/applicant/resumes/touch). Сид теперь один на установку.
+        let noiseSeed = result.hh_noise_seed;
+        if (!Array.isArray(noiseSeed) || noiseSeed.length !== 2 ||
+            !Number.isFinite(noiseSeed[0]) || !Number.isFinite(noiseSeed[1])) {
+            const nb = new Uint32Array(2);
+            crypto.getRandomValues(nb);
+            noiseSeed = [(nb[0] | 1) >>> 0, (nb[1] || 0x6D2B79F5) >>> 0];
+            try { await chrome.storage.local.set({ hh_noise_seed: noiseSeed }); } catch(e) {}
+        }
+        NOISE_SEED = noiseSeed;
 
         if (result.hh_selected_gpu && result.hh_selected_gpu.webglVendor &&
             / \(0x[0-9A-Fa-f]{8}\) /.test(result.hh_selected_gpu.webglRenderer || '')) {

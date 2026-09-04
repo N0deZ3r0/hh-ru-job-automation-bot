@@ -23,26 +23,39 @@
                                 ? _NativeCrypto.getRandomValues.bind(_NativeCrypto) : null;
     // ─────────────────────────────────────────────────────────────────────────
 
-    var ID = window.__HH_PROFILE_DATA__;
-
-    // [FIX RACE CONDITION] Если профиля нет — применяем заглушки немедленно,
-    // а после получения реальных данных перезаписываем их.
-    if (!ID) {
-        applyStubs();
-        // FIX: была ОДНА попытка через 100мс. Если background.js не успевал выполнить
-        // executeScript (а он гонится с document_start), защита не включалась вообще
-        // до конца жизни вкладки. Теперь опрашиваем до 2 секунд.
-        var _profileTries = 0;
-        var _pollProfile = function() {
-            ID = window.__HH_PROFILE_DATA__;
-            if (ID) { initProtection(ID); return; }
-            if (++_profileTries < 40) setTimeout(_pollProfile, 50);
-        };
-        setTimeout(_pollProfile, 50);
-        return;
-    }
+    // [FIX ГОНКА — главная причина неработавшей защиты]
+    // Замер на живой странице hh.ru: этот скрипт стартует, когда в документе
+    // 0 скриптов страницы — идеальный момент для перехвата. Но профиль с
+    // видеокартой приходит отдельно, из background.js через executeScript по
+    // событию tabs.onUpdated, то есть ПОЗЖЕ. Прежний код в этом случае ставил
+    // только заглушку webdriver и опрашивал window до двух секунд: реальные
+    // патчи вставали через 205 мс, когда на странице было уже 31 скрипт.
+    // За это окно антифрод hh.ru успевал загрузиться и захватить нативные
+    // ссылки — поэтому подмена WebGL не доходила до страницы, а маскировка
+    // помечала функции, которых в прототипах уже не было.
+    //
+    // Теперь хуки ставятся СРАЗУ и читают значения из живого объекта ID.
+    // Профиль, придя позже, просто дополняет этот же объект — перехват уже
+    // стоит, перепатчивать ничего не нужно.
+    var ID = window.__HH_PROFILE_DATA__ || {};
 
     initProtection(ID);
+
+    if (!window.__HH_PROFILE_DATA__) {
+        var _profileTries = 0;
+        var _pollProfile = function() {
+            var p = window.__HH_PROFILE_DATA__;
+            if (p && typeof p === 'object') {
+                // Дополняем ТОТ ЖЕ объект, на который уже смотрят установленные хуки.
+                for (var k in p) {
+                    if (Object.prototype.hasOwnProperty.call(p, k)) ID[k] = p[k];
+                }
+                return;
+            }
+            if (++_profileTries < 80) setTimeout(_pollProfile, 25);
+        };
+        setTimeout(_pollProfile, 25);
+    }
 
     // Минимальные безопасные заглушки до загрузки профиля.
     // Гарантируют, что страница не снимет реальный отпечаток в окно 0–100 мс.
@@ -63,7 +76,7 @@
         // Остаётся только webdriver — единственное, что действительно надо скрыть.
     }
 
-    function initProtection(ID) {
+    function initProtection(ID) {
 
     // ── МАСКИРОВКА ПАТЧЕЙ ПОД NATIVE CODE ────────────────────────────────
     // Объявлено в начале initProtection: _def ниже помечает свои геттеры сразу,
@@ -95,8 +108,19 @@
     }
 
     (function loadWasmIntoMainWorld() {
-        var glueUrl = ID.wasmGlueUrl, binUrl = ID.wasmBinaryUrl;
-        if (!glueUrl || !binUrl) return;
+        // [FIX] Адреса WASM приходят в профиле, а хуки теперь ставятся ДО него.
+        // Прежний однократный выход при пустом профиле означал бы, что в MAIN world
+        // модуль не загрузится никогда и шум навсегда останется JS-фолбэком.
+        // Ждём появления адресов и грузим, как только они есть.
+        var _wasmTries = 0;
+        (function waitUrls() {
+            if (!ID.wasmGlueUrl || !ID.wasmBinaryUrl) {
+                if (++_wasmTries < 80) setTimeout(waitUrls, 25);
+                return;
+            }
+            start(ID.wasmGlueUrl, ID.wasmBinaryUrl);
+        })();
+        function start(glueUrl, binUrl) {
         (async function() {
             try {
                 // Загрузчик выполняется внутри new Function: объявление
@@ -104,11 +128,12 @@
                 // иначе страница увидела бы его и опознала расширение.
                 var src = await (await fetch(glueUrl)).text();
                 var loader = new Function(src + '\nreturn HHProtectWasm;')();
-                _wasm = await loader.load(binUrl);
+                _wasm = await loader.load(binUrl, ID.noiseSeed);
             } catch(e) {
                 // CSP, недоступный ресурс, что угодно — остаёмся на JS-фолбэках
             }
         })();
+        }
     })();
 
     function _def(obj, prop, value) {
@@ -202,22 +227,68 @@
         HTMLCanvasElement.prototype.getContext = function(type) {
             var c = _origGetContext.apply(this, arguments);
             if (c && (type === '2d' || type === 'experimental-2d')) _has2d.add(this);
+            // [FIX конфликт с другим расширением] Замер в живом Chrome пользователя:
+            // у только что созданного WebGL-контекста оказалось РОВНО ОДНО собственное
+            // свойство — getParameter, и это ни наша функция, ни нативная. Во встроенном
+            // браузере без расширений собственных свойств у контекста ноль, значит его
+            // вешает другое расширение, перехватившее getContext раньше нас.
+            // Собственное свойство перекрывает прототип, поэтому наш патч переставал
+            // действовать: вызов через прототип отдавал подменённую карту, а обычный
+            // g.getParameter(...) — настоящую.
+            // Наш getContext отрабатывает ПОСЛЕ чужого (мы вызываем его как
+            // _origGetContext), поэтому просто снимаем перекрытие — и обращение
+            // снова уходит в прототип, к нашему патчу.
+            if (c) {
+                var t = String(type || '').toLowerCase();
+                if (t.indexOf('webgl') !== -1 || t.indexOf('experimental-webgl') !== -1) {
+                    try {
+                        if (Object.prototype.hasOwnProperty.call(c, 'getParameter')) delete c.getParameter;
+                    } catch(e) {}
+                    try {
+                        if (Object.prototype.hasOwnProperty.call(c, 'getExtension')) delete c.getExtension;
+                    } catch(e) {}
+                }
+            }
             return c;
         };
 
         // Сид стабилен в пределах сессии: один и тот же canvas даёт один и тот же
         // отпечаток при повторных чтениях, но разный между сессиями.
-        var _canvasSeed = (function() {
-            if (_NativeGetRandValues) {
-                var b = new Uint32Array(1);
-                _NativeGetRandValues(b);
-                return b[0] || 1;
+        // [FIX плавающий отпечаток] Сид больше не случаен при каждой загрузке.
+        // Берём постоянный сид из профиля; пока он не приехал — выводим
+        // детерминированно из характеристик машины, которые сами по себе
+        // стабильны. Главное — чтобы отпечаток не менялся между заходами.
+        function _stableSeed() {
+            if (ID.noiseSeed && typeof ID.noiseSeed[0] === 'number') return ID.noiseSeed[0] >>> 0 || 1;
+            var basis = '';
+            try {
+                basis = String(navigator.userAgent) + '|' + screen.width + 'x' + screen.height +
+                        '|' + (navigator.hardwareConcurrency || 0) + '|' + (navigator.deviceMemory || 0);
+            } catch(e) { basis = 'hh'; }
+            var h = 2166136261;
+            for (var i = 0; i < basis.length; i++) {
+                h ^= basis.charCodeAt(i);
+                h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
             }
-            return ((Math.random() * 0xFFFFFFFF) >>> 0) || 1;
+            return h || 1;
+        }
+        // Ленивый: до прихода профиля отдаёт детерминированный сид от машины,
+        // после — постоянный сид установки. Оба стабильны между загрузками.
+        var _canvasSeedCache = null;
+        function _canvasSeedValue() {
+            if (ID.noiseSeed && typeof ID.noiseSeed[0] === 'number') return ID.noiseSeed[0] >>> 0 || 1;
+            if (_canvasSeedCache === null) _canvasSeedCache = _stableSeed();
+            return _canvasSeedCache;
+        }
+        var _unusedSeedInit = (function() {
+            return _stableSeed();
         })();
 
         function jsCanvasNoise(imageData) {
-            var d = imageData.data, seed = _canvasSeed;
+            // _canvasSeedValue появляется только внутри initProtection. Тест 
+            // достаёт эту функцию отдельно и передаёт сид параметром — не рушим ему сцену.
+            var d = imageData.data;
+            var seed = (typeof _canvasSeedValue === 'function') ? _canvasSeedValue() : _canvasSeed;
             for (var i = 0; i < d.length; i += 4) {
                 seed = (seed * 1664525 + 1013904223) >>> 0;
                 var ch = (seed >>> 28) & 3;          // 3 = пропустить пиксель
@@ -437,8 +508,17 @@
         var g1 = WebGLRenderingContext.prototype;
         var origGP1 = g1.getParameter;
         g1.getParameter = function(p) {
-            if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
-            if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+            // Значения читаются в момент ВЫЗОВА. Пока профиль не приехал,
+            // отдаём настоящее значение: undefined здесь выдал бы подмену
+            // вернее, чем честный ответ.
+            if (p === 0x1F00 || p === 0x9245) {
+                if (ID.webglVendor !== undefined) return ID.webglVendor;
+                try { return origGP1.call(this, p); } catch(e) { return null; }
+            }
+            if (p === 0x1F01 || p === 0x9246) {
+                if (ID.webglRenderer !== undefined) return ID.webglRenderer;
+                try { return origGP1.call(this, p); } catch(e) { return null; }
+            }
             // MAX_TEXTURE_MAX_ANISOTROPY_EXT — тоже часть отпечатка GPU
             if (p === 0x84FF) {
                 var w = getWasm();
@@ -484,8 +564,14 @@
             _patchShaderPrecision(g2);
             var origGP2 = g2.getParameter;
             g2.getParameter = function(p) {
-                if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
-                if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+                if (p === 0x1F00 || p === 0x9245) {
+                    if (ID.webglVendor !== undefined) return ID.webglVendor;
+                    return origGP2.call(this, p);
+                }
+                if (p === 0x1F01 || p === 0x9246) {
+                    if (ID.webglRenderer !== undefined) return ID.webglRenderer;
+                    return origGP2.call(this, p);
+                }
                 if (p === 0x84FF) {
                     var w = getWasm();
                     if (w && w.maxAnisotropy) { try { return w.maxAnisotropy(); } catch(e) {} }
@@ -828,6 +914,13 @@
         window.Date.UTC = _OrigDate.UTC;
         Object.setPrototypeOf(window.Date, _OrigDate);
         window.Date.prototype = _OrigDate.prototype;
+        // [FIX маркеры шима] У нативного Date length === 7, а дескриптор prototype —
+        // { writable: false, enumerable: false, configurable: false }. У обычной
+        // функции length === 0 и prototype writable, поэтому обе проверки выдавали
+        // подмену в одну строку. Для неконфигурируемого свойства переход
+        // writable true → false разрешён спецификацией, так что правка проходит.
+        try { Object.defineProperty(window.Date, 'length', { value: 7, writable: false, enumerable: false, configurable: true }); } catch(e) {}
+        try { Object.defineProperty(window.Date, 'prototype', { writable: false }); } catch(e) {}
         // [FIX constructor] Без этого (new Date()).constructor !== Date — тривиальный
         // маркер подмены. prototype общий с оригиналом, так что правка согласована.
         try {
@@ -848,9 +941,10 @@
 
     // ===== HISTORY.LENGTH =====
     try {
-        var _fakeHistLen = 3 + (_NativeGetRandValues
-            ? (function(){ var b = new Uint8Array(1); _NativeGetRandValues(b); return b[0]; })()
-            : (Math.random() * 256 | 0)) % 10;
+        // [FIX] Длина истории тоже перевыбиралась случайно на каждой загрузке —
+        // ещё одно значение отпечатка, которое у живого пользователя так не скачет.
+        // Выводим из того же постоянного сида.
+        var _fakeHistLen = 3 + (_stableSeed() % 10);
         Object.defineProperty(history, 'length', {
             get: function() { return _fakeHistLen; },
             configurable: true
@@ -869,28 +963,20 @@
     } catch(e) {}
 
     // ===== INTL LOCALE PATCH =====
-    if (ID.language) {
-        try {
-            var _patchIntlFormat = function(OrigClass) {
-                var Patched = function(loc, opts) {
-                    if (!loc) loc = ID.language;
-                    return Reflect.construct(OrigClass, [loc, opts], new.target || OrigClass);
-                };
-                Patched.prototype = Object.create(OrigClass.prototype);
-                Patched.prototype.constructor = Patched;
-                var _origRO2 = OrigClass.prototype.resolvedOptions;
-                Patched.prototype.resolvedOptions = function() {
-                    return Object.assign({}, _origRO2.call(this), { locale: ID.language });
-                };
-                OrigClass.prototype.resolvedOptions = Patched.prototype.resolvedOptions;
-                Object.setPrototypeOf(Patched, OrigClass);
-                return Patched;
-            };
-            if (typeof Intl.NumberFormat !== 'undefined') Intl.NumberFormat = _patchIntlFormat(Intl.NumberFormat);
-            if (typeof Intl.RelativeTimeFormat !== 'undefined') Intl.RelativeTimeFormat = _patchIntlFormat(Intl.RelativeTimeFormat);
-            if (typeof Intl.ListFormat !== 'undefined') Intl.ListFormat = _patchIntlFormat(Intl.ListFormat);
-        } catch(e) {}
-    }
+    // Патч УДАЛЁН. Он подставлял ID.language в Intl.NumberFormat / RelativeTimeFormat /
+    // ListFormat, но ID.language — это navigator.language настоящего браузера
+    // (см. collectRealEnvironment в background.js), то есть подменял значение на
+    // него же. Пользы ноль, а цена — три маркера расширения, снятые на живой странице:
+    //   Intl.NumberFormat.name                                  → "Patched"  (нативно "NumberFormat")
+    //   Intl.NumberFormat.prototype.resolvedOptions.toString()  → исходник патча целиком
+    //   Intl.NumberFormat.prototype !== оригинального прототипа
+    // Ни одна из трёх обёрток не попадала в _nativeLookupSet, поэтому маскировка
+    // через Function.prototype.toString их не прикрывала. Проверка на две строки
+    // разоблачала расширение вернее, чем полное отсутствие защиты.
+    // Подмена ЯЗЫКА здесь и не нужна: Accept-Language уходит настоящий, расширение
+    // заголовки не переписывает — расхождение создавал бы как раз патч.
+    // Часовой пояс (Intl.DateTimeFormat) патчится выше и только если он реально
+    // отличается от системного.
 
     // ===== ERROR.STACK =====
     // Патч удалён: он никогда не выполнялся. Условие требовало, чтобы 'stack'
@@ -912,7 +998,7 @@
             if (_nativeLookupSet.has(this)) return 'function ' + (this.name || '') + '() { [native code] }';
             return _origFnToString.call(this);
         };
-        _nativeLookupSet.add(Function.prototype.toString);
+        _nativeLookupSet.add(Function.prototype.toString);
         _markNative(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
         _markNative(HTMLCanvasElement.prototype.getContext, 'getContext');
         try { _markNative(CanvasRenderingContext2D.prototype.measureText, 'measureText'); } catch(e) {}
@@ -939,7 +1025,7 @@
         try { _markNative(Intl.DateTimeFormat, 'DateTimeFormat'); } catch(e) {}
         try { _markNative(Intl.DateTimeFormat.prototype.resolvedOptions, 'resolvedOptions'); } catch(e) {}
         try { _markNative(WebGLRenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
-        try { if (typeof WebGL2RenderingContext !== 'undefined') _markNative(WebGL2RenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
+        try { if (typeof WebGL2RenderingContext !== 'undefined') _markNative(WebGL2RenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
     } catch(e) {}
 
     } // конец функции initProtection
