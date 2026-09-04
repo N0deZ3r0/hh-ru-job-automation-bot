@@ -271,53 +271,12 @@
         }
     } catch(e) {}
 
-    // Worker защита
-    try {
-        const OrigWorker = window.Worker;
-        if (OrigWorker) {
-            window.Worker = function(url, options) {
-                const payload = window.__hh_worker_data__;
-                // FIX: если инжектить нечего — не трогаем воркер вообще. Раньше шим
-                // заворачивал в blob: любой воркер, ломая self.location и относительные
-                // importScripts, при том что payload всегда был пустым.
-                if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) {
-                    return new OrigWorker(url, options);
-                }
-                // module-воркеры не умеют importScripts — шим к ним неприменим
-                if (options && options.type === 'module') return new OrigWorker(url, options);
-
-                const urlStr = (url instanceof URL) ? url.href : String(url);
-                // FIX race condition: старый шим ждал данных от main-потока через
-                // addEventListener('message', ..., {once:true}). Первое же postMessage
-                // страницы срабатывало на этот слушатель, он снимался — и importScripts
-                // не вызывался никогда, воркер оставался пустым. Плюс служебное
-                // 'hh-ready' прилетало в onmessage самой страницы. Теперь данные вшиты
-                // в код шима, а исходный скрипт грузится синхронно при старте воркера.
-                const shimCode = [
-                    'self.__hh_worker_data__ = ' + JSON.stringify(payload) + ';',
-                    'try {',
-                    '  self.dispatchEvent(new CustomEvent("hh-inject-data", { detail: self.__hh_worker_data__ }));',
-                    '} catch(_) {}',
-                    'importScripts(' + JSON.stringify(urlStr) + ');'
-                ].join('\n');
-                const blob = new Blob([shimCode], { type: 'application/javascript' });
-                const blobUrl = URL.createObjectURL(blob);
-                let worker;
-                try {
-                    worker = new OrigWorker(blobUrl, options);
-                } catch(e) {
-                    URL.revokeObjectURL(blobUrl);
-                    return new OrigWorker(url, options);
-                }
-                // Скрипт уже забран конструктором — blob отзываем сразу, без
-                // setTimeout(1000), который держал память и создавал гонку.
-                URL.revokeObjectURL(blobUrl);
-                return worker;
-            };
-            // [FIX Worker Proxy] Прототипная цепочка через Object.setPrototypeOf —
-            // instanceof Worker работает корректно
-            Object.setPrototypeOf(window.Worker, OrigWorker);
-            window.Worker.prototype = OrigWorker.prototype;
-        }
-    } catch(e) {}
+    // Патч Worker удалён: он не мог сработать.
+    // Шим включался только при непустом window.__hh_worker_data__, а это поле
+    // никто никогда не заполнял — во всём расширении оно только читалось.
+    // Событие hh-inject-data, которое шим отправлял внутрь воркера, тоже никто
+    // не слушал. Вдобавок core.js живёт в ISOLATED world, поэтому подменённый
+    // здесь window.Worker страница вообще не видит: патч действовал лишь на код
+    // самого расширения, а оно воркеров не создаёт.
+    // Оставалась обёртка вокруг конструктора, которая ничего не делала.
 })();

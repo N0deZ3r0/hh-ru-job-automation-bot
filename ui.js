@@ -244,6 +244,11 @@
 
             const tb = document.createElement('button');
             tb.id = 'hh-toggle-btn';
+            // [FIX] Класс не навешивался, а стили выше объявлены как
+            // .hh-toggle-btn и .hh-toggle-btn.hh-toggle-running. Селектор из двух
+            // классов не совпадал ни с чем, поэтому кнопка не краснела на время
+            // работы, а правила :hover и transition были мёртвыми.
+            tb.className = 'hh-toggle-btn';
             tb.textContent = '\uD83D\uDE80';
             
             const isDark = bot.theme === 'dark';

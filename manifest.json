@@ -83,8 +83,5 @@
         "path": "rules.json"
       }
     ]
-  },
-  "optional_permissions": [
-    "declarativeNetRequestFeedback"
-  ]
+  }
 }

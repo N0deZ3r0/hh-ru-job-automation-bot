@@ -621,7 +621,6 @@
     } catch(e) {}
 
     // ===== FONTS =====
-    var _fontsPatchedSet = new WeakSet(); // [FIX] WeakSet вместо _hhPatched флага
     try {
         var allowedFontsSet = new Set(ID.allowedFonts || []);
 
@@ -659,16 +658,17 @@
         }
 
         if (document.fonts) {
+            // Публичного флага на прототипе нет специально: сайт мог бы найти его
+            // перебором свойств. Защита от повторного патча не нужна — вся IIFE
+            // выполняется один раз (флаг window.__hh_injected__), и initProtection
+            // за загрузку страницы вызывается ровно однажды.
             var FFSProto = Object.getPrototypeOf(document.fonts);
-            // [FIX _hhPatched] Убран публичный флаг на прототипе — сайт мог
-            // обнаружить его итерацией свойств. Используем WeakSet вместо флага.
-            if (FFSProto && !_fontsPatchedSet.has(FFSProto)) {
+            if (FFSProto) {
                 Object.defineProperty(FFSProto, 'check', {
                     value: fontCheckFn,
                     configurable: true,
                     writable: true
                 });
-                _fontsPatchedSet.add(FFSProto);
             }
         }
     } catch(e) {}
@@ -892,23 +892,15 @@
         } catch(e) {}
     }
 
-    // ===== ERROR.STACK ЗАЩИТА =====
-    try {
-        var _origErrStackDesc = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
-        if (_origErrStackDesc && _origErrStackDesc.get) {
-            var _origStackGetter = _origErrStackDesc.get;
-            Object.defineProperty(Error.prototype, 'stack', {
-                get: function() {
-                    var s = _origStackGetter.call(this);
-                    if (!s) return s;
-                    return s.split('\n')
-                        .filter(function(l) { return l.indexOf('chrome-extension://') === -1; })
-                        .join('\n');
-                },
-                configurable: true
-            });
-        }
-    } catch(e) {}
+    // ===== ERROR.STACK =====
+    // Патч удалён: он никогда не выполнялся. Условие требовало, чтобы 'stack'
+    // был аксессором на Error.prototype, но в V8 это собственное свойство
+    // каждого экземпляра ошибки — getOwnPropertyDescriptor(Error.prototype,
+    // 'stack') возвращает undefined, и весь блок пропускался.
+    // Кадры расширения по-прежнему могут попасть в стек, если страница вызовет
+    // патченую функцию и та бросит исключение. Рабочее решение требует
+    // перехвата на уровне конструкторов ошибок и само по себе заметно,
+    // поэтому вместо неработающего кода здесь остаётся честная пометка.
 
     // ===== FUNCTION.PROTOTYPE.TOSTRING =====
     // Самая важная защита — патченые функции выглядят нативными через .toString()
