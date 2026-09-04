@@ -54,6 +54,9 @@ This is the answer to that.
 No build step is required — the compiled `protect.wasm` is committed. On the first
 hh.ru page a floating rocket button appears; it opens the control panel.
 
+A packaged ZIP is attached to every [release](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/releases/latest)
+if you would rather not clone the repository.
+
 ## How it works
 
 The bot walks the search results page, filters out what you told it to skip, and
@@ -190,6 +193,33 @@ The suites read the sources as text and extract the real functions, so they test
 the code that ships rather than a copy. CI runs them together with the manifest
 and JSON validation on every push and pull request.
 
+## Releases
+
+Releases are built by CI from a tag:
+
+```bash
+git tag v2.4
+git push origin v2.4
+```
+
+The workflow validates the sources, runs every test suite, rebuilds
+`protect.wasm` from `wasm/protect.wat` and compares it byte for byte with the
+committed binary, checks that the tag matches the version in `manifest.json`,
+packs the extension and publishes the release with generated notes.
+
+The archive holds the extension runtime only — the WASM source, tests, scripts
+and documentation stay in the repository. Builds are reproducible: the ZIP uses
+fixed timestamps, so the same commit always produces the same file.
+
+```bash
+npm run pack               # dist/hh-auto-responder-v<version>.zip
+node scripts/pack.mjs --list   # what would go into it
+npm run check:wasm         # binary still matches its source?
+```
+
+Running the workflow manually (**Actions → Release → Run workflow**) builds the
+archive and uploads it as a build artifact without publishing anything.
+
 ## Project layout
 
 | File | Role |
@@ -203,6 +233,7 @@ and JSON validation on every push and pull request.
 | `content.js` | Bot logic |
 | `rules.json` | declarativeNetRequest rules |
 | `wasm/` | WASM source, build script, module tests |
+| `scripts/` | Packing and release notes |
 | `test/` | Unit tests |
 
 ## Requirements

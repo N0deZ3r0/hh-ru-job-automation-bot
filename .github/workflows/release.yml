@@ -1,0 +1,95 @@
+name: Release
+
+# Релиз собирается по тегу вида v2.4. Версия в теге обязана совпадать с
+# версией в manifest.json — иначе сборка падает, чтобы в релиз не уехал
+# архив с чужим номером.
+#
+#   git tag v2.4 && git push origin v2.4
+#
+# workflow_dispatch собирает архив без публикации — удобно проверить,
+# что именно попадёт в релиз.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # нужна вся история и теги для списка изменений
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Validate sources
+        run: npm run validate
+
+      - name: Unit tests
+        run: npm test
+
+      # Бинарник лежит в репозитории, чтобы расширение ставилось без тулчейна.
+      # Здесь пересобираем его из wasm/protect.wat и сверяем побайтово —
+      # так в релиз не может уехать WASM, не соответствующий своему исходнику.
+      - name: Verify protect.wasm matches its source
+        run: npm run check:wasm
+
+      - name: Check the tag against manifest.json
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          echo "тег: $TAG, манифест: $MANIFEST"
+          if [ "$TAG" != "v$MANIFEST" ]; then
+            echo "::error::Тег $TAG не совпадает с версией в manifest.json ($MANIFEST). Обновите манифест или переставьте тег."
+            exit 1
+          fi
+
+      - name: Pack the extension
+        run: npm run pack
+
+      - name: Generate release notes
+        run: node scripts/release-notes.mjs > release-notes.md
+
+      - name: Show what will be published
+        run: |
+          echo "=== файлы в архиве ==="
+          node scripts/pack.mjs --list
+          echo
+          echo "=== описание релиза ==="
+          cat release-notes.md
+
+      - name: Upload the archive as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/hh-auto-responder-v${VERSION}.zip" \
+            --title "HH Авто-отклик Pro ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag

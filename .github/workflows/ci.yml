@@ -40,3 +40,14 @@ jobs:
 
       - name: WebAssembly module
         run: node wasm/test.mjs
+
+      # Бинарник закоммичен, чтобы расширение ставилось без тулчейна.
+      # Проверяем на каждом пуше, что он собран из текущего wasm/protect.wat.
+      - name: protect.wasm matches its source
+        run: |
+          npm ci
+          npm run check:wasm
+
+      # Ловим поломку упаковщика до релиза, а не во время него.
+      - name: Extension packs
+        run: npm run pack

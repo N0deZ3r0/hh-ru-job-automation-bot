@@ -6,9 +6,12 @@
   "scripts": {
     "build:wasm": "node wasm/build.mjs",
     "test": "node test/protect.mjs && node test/bot.mjs && node wasm/test.mjs",
-    "validate": "node .github/scripts/validate.mjs js && node .github/scripts/validate.mjs json && node .github/scripts/validate.mjs manifest"
+    "validate": "node .github/scripts/validate.mjs js && node .github/scripts/validate.mjs json && node .github/scripts/validate.mjs manifest",
+    "check:wasm": "node wasm/build.mjs --check",
+    "pack": "node scripts/pack.mjs",
+    "release:notes": "node scripts/release-notes.mjs"
   },
   "devDependencies": {
-    "wabt": "^1.0.39"
+    "wabt": "1.0.39"
   }
 }
