@@ -33,7 +33,7 @@ demand a test, and keeps the machine doing it from standing out.**
 | Backup | JSON export / import |
 | Session log | Last 30 runs |
 | WASM core | 842 bytes, 8 functions, built from source |
-| Tracker blocking | 21 domains, 24 declarativeNetRequest rules |
+| Tracker blocking | 21 domains, 22 declarativeNetRequest rules |
 | Fingerprint defence | GPU, canvas, audio, text metrics, WebGL precision |
 
 ## Background
@@ -155,7 +155,7 @@ fingerprint that changes between two reads is itself an anomaly.
 ### Network filtering
 
 `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon` are
-wrapped, and 21 tracker domains are blocked both there and by 24
+wrapped, and 21 tracker domains are blocked both there and by 22
 declarativeNetRequest rules. Requests to loopback and private ranges
 (`127.0.0.1`, `192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `::1`, `fc00::/7`)
 are refused.
