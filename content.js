@@ -431,6 +431,18 @@
                 this._sessionStart = null;
             }
 
+            // [FIX кнопка закрытия] Проверено на живой модалке hh.ru: у неё
+            // data-qa="response-popup-close" и aria-label="Отмена".
+            // Бот искал data-qa="vacancy-response-popup-close" (лишний префикс vacancy-)
+            // и aria-label="Закрыть" — оба селектора не находят НИЧЕГО, то есть
+            // closeModal() был полностью холостым, и модалка оставалась висеть.
+            // Старые варианты сохранены как запасные — на случай другой раскладки.
+            static get CLOSE_SEL() {
+                return '[data-qa="response-popup-close"],'
+                     + '[data-qa="vacancy-response-popup-close"],'
+                     + '[aria-label="Отмена"],[aria-label="Закрыть"]';
+            }
+
             wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
             async smartDelay() {
@@ -530,18 +542,63 @@
                 } catch(e) {}
             }
 
+            // [FIX offsetParent] По CSSOM у элемента с position:fixed offsetParent
+            // ВСЕГДА null. Модалки hh.ru — магриттовские, их оверлей и контейнер
+            // объявлены position:fixed, поэтому проверки вида `dialog?.offsetParent`
+            // молча считали открытую модалку невидимой. Быстрый путь сохранён:
+            // если offsetParent есть — сразу true, лишних измерений нет.
+            _isVisible(el) {
+                if (!el) return false;
+                if (el.offsetParent) return true;
+                try {
+                    const r = el.getBoundingClientRect();
+                    if (!r.width && !r.height) return false;
+                    const view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+                    const cs = view.getComputedStyle(el);
+                    return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+                } catch(e) { return false; }
+            }
+
+            // [FIX мёртвый класс] .vacancy-serp-item на текущем hh.ru не существует —
+            // вёрстка переехала на CSS-модули (vacancy-card--<hash>). closest() по нему
+            // всегда возвращал null, и карточка находилась только запасным селектором.
+            // Единая точка входа — тот же _getCard, что используется во всём остальном коде.
+            _cardOf(b) {
+                return this._getCard(b) || b.closest('[class*="vacancy-card"]');
+            }
+
+            // [FIX маркер отклика] data-qa="vacancy-serp__vacancy_responded" и текст
+            // «Вы откликнулись» на выдаче больше не встречаются. Актуальный признак —
+            // контейнер статуса workflow-status-container--<hash> (для откликнутых,
+            // отказов, приглашений). Проверено на живой выдаче: он есть ровно у карточек
+            // без кнопки «Откликнуться» и ни у одной из карточек с кнопкой.
+            _isRespondedCard(b) {
+                const p = this._cardOf(b);
+                if (!p) return false;
+                if (p.querySelector('[class*="workflow-status-container"]')) return true;
+                if (p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]')) return true;
+                return (p.textContent || '').includes('Вы откликнулись');
+            }
+
             isLimitReached() {
                 if (this.stats.success >= 198) return true;
                 const lm = document.querySelector('[data-qa-popup-error-code="negotiations-limit-exceeded"]');
-                if (lm?.offsetParent) return true;
+                if (this._isVisible(lm)) return true;
                 const ue = document.querySelector('[data-qa-popup-error-code="unknown"]');
-                if (ue?.offsetParent) {
+                if (this._isVisible(ue)) {
                     const t = ue.textContent || '';
                     if ((t.includes('не более 200') || t.includes('лимит') || t.includes('исчерпали')) && this.stats.success >= 190) return true;
                 }
-                const ms = document.querySelectorAll('.magritte-text, .bloko-translate-guard');
-                for (const m of ms) {
-                    if (m.textContent && (m.textContent.includes('не более 200 откликов') || m.textContent.includes('Вы исчерпали лимит')) && m.offsetParent) return true;
+                // [FIX мёртвый селектор] Классов .magritte-text и .bloko-translate-guard
+                // на hh.ru нет: стили собираются CSS-модулями, реальный класс выглядит как
+                // magritte-text___pbpft_5-3-12. Точечный селектор не находил НИЧЕГО, и
+                // текстовый фолбэк лимита не работал вовсе. Ищем по подстроке класса и
+                // только внутри модалок — на выдаче элементов magritte-text больше тысячи,
+                // сканировать их все на каждой вакансии слишком дорого.
+                const scopes = document.querySelectorAll('[role="dialog"],[role="alertdialog"],[data-qa-popup-error-code]');
+                for (const scope of scopes) {
+                    const t = scope.textContent || '';
+                    if ((t.includes('не более 200 откликов') || t.includes('Вы исчерпали лимит')) && this._isVisible(scope)) return true;
                 }
                 return false;
             }
@@ -694,7 +751,7 @@
                             // [FIX directLink race] finish() вызывается ДО click() — предотвращает
                             // двойной вызов если interval сработает в промежутке 500мс
                             const directLink = d.querySelector('[data-qa="vacancy-response-link-advertising"]');
-                            if (directLink && directLink.offsetParent) {
+                            if (directLink && this._isVisible(directLink)) {
                                 this.stats.success++;
                                 this.updateStatsDisplay();
                                 finish({ isTest: false, directResponse: true });
@@ -704,7 +761,7 @@
 
                             // 3. Обычная форма отклика
                             const submitBtn = d.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                            if (submitBtn && submitBtn.offsetParent && !submitBtn.hasAttribute('disabled')) {
+                            if (submitBtn && this._isVisible(submitBtn) && !submitBtn.hasAttribute('disabled')) {
                                 finish({ isTest: false });
                                 return;
                             }
@@ -766,7 +823,7 @@
             }
 
             async closeChatIfOpened() {
-                try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (b?.offsetParent) { b.click(); await this.wait(500); return true; } } catch(e) {}
+                try { const b = document.querySelector('[data-qa="chatik-close-chatik"]'); if (this._isVisible(b)) { b.click(); await this.wait(500); return true; } } catch(e) {}
                 return false;
             }
 
@@ -774,8 +831,8 @@
             async forceCloseAnyModal() {
                 try {
                     const modal = document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
-                    if (modal?.offsetParent) {
-                        const closeBtn = modal.querySelector('[data-qa="vacancy-response-popup-close"], [aria-label="Закрыть"]');
+                    if (this._isVisible(modal)) {
+                        const closeBtn = modal.querySelector(HHAutoResponder.CLOSE_SEL);
                         if (closeBtn) { closeBtn.click(); }
                         else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); }
                         await this.wait(400);
@@ -785,13 +842,12 @@
 
             async checkAndCloseDirectResponseModal(o) {
                 const dialog = document.querySelector('[role="alertdialog"][aria-modal="true"]');
-                if (!dialog?.offsetParent) return false;
+                if (!this._isVisible(dialog)) return false;
                 const title = dialog.querySelector('[data-qa="magritte-alert-title"]') || dialog.querySelector('[data-qa="title"]');
                 if (!title?.textContent.includes('прямым откликом')) return false;
                 if (o && this.settings.autoRememberOrganizations) this.addToAutoFilter(o);
                 const cancelBtn = dialog.querySelector('[data-qa="vacancy-response-link-advertising-cancel"]')
-                               || dialog.querySelector('[data-qa="vacancy-response-popup-close"]')
-                               || dialog.querySelector('button[aria-label="Закрыть"]');
+                               || dialog.querySelector(HHAutoResponder.CLOSE_SEL);
                 if (cancelBtn) { cancelBtn.click(); }
                 else { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); }
                 await this.wait(500);
@@ -799,7 +855,9 @@
             }
 
             getVacancyTitleFromModal() {
-                for (const s of ['[data-qa="title-description"] .magritte-text_style-secondary', '[data-qa="title-description"] .magritte-text', '.magritte-modal-content [data-qa="title-description"]', '[role="dialog"] [data-qa="title-description"]']) {
+                // [FIX мёртвый класс] .magritte-text / .magritte-text_style-secondary не
+                // существуют — CSS-модули добавляют хеш. Ищем по подстроке класса.
+                for (const s of ['[data-qa="title-description"] [class*="magritte-text_style-secondary"]', '[data-qa="title-description"] [class*="magritte-text"]', '[class*="magritte-modal-content"] [data-qa="title-description"]', '[role="dialog"] [data-qa="title-description"]', '[data-qa="title-description"]']) {
                     const e = document.querySelector(s);
                     if (e) { const t = e.textContent.trim(); if (t && t.length > 2 && t.length < 200 && !t.includes('Отклик')) return t; }
                 }
@@ -807,8 +865,16 @@
             }
 
             async closeModal() {
-                const b = document.querySelector('[data-qa="vacancy-response-popup-close"]') || document.querySelector('[aria-label="Закрыть"]');
+                const b = document.querySelector(HHAutoResponder.CLOSE_SEL);
                 if (b) { b.click(); await this.wait(300); }
+                // Если кнопка не сработала (или её не нашли) — добиваем Escape.
+                // Раньше метод молча ничего не делал и модалка оставалась открытой,
+                // из-за чего следующая вакансия обрабатывалась поверх чужой формы.
+                const still = document.querySelector('[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]');
+                if (still && this._isVisible(still)) {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+                    await this.wait(300);
+                }
             }
 
             // [FIX openResumeDropdown] Retry до 2 раз — на медленных страницах дропдаун не открывается с первого клика
@@ -821,7 +887,7 @@
                             cl.click();
                             await this.wait(600 + attempt * 400);
                             const dd = document.querySelector('[role="listbox"]');
-                            if (dd?.offsetParent) return true;
+                            if (this._isVisible(dd)) return true;
                         }
                     }
                 }
@@ -909,7 +975,12 @@
                     }
                     return await this.submitResponse();
                 }
-                const al = document.querySelector('[data-qa="add-cover-letter"]');
+                // [FIX] В модалке письмо раскрывает data-qa="add-cover-letter", а на
+                // отдельной странице /applicant/vacancy_response — уже
+                // data-qa="vacancy-response-letter-toggle" («Сопроводительное письмо · Добавить»).
+                // Бот знал только первый вариант, поэтому на странице письмо не
+                // раскрывалось и отклик уходил вообще без сопроводительного.
+                const al = document.querySelector('[data-qa="add-cover-letter"], [data-qa="vacancy-response-letter-toggle"]');
                 if (al && !this.settings.skipCoverLetter) { al.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
                 const rl = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться'));
                 if (rl) { rl.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
@@ -946,7 +1017,7 @@
             findButtonByVacancyId(vacancyId) {
                 if (!vacancyId) return null;
                 for (const btn of document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')) {
-                    if (!btn.offsetParent || btn.style.display === 'none') continue;
+                    if (!this._isVisible(btn) || btn.style.display === 'none') continue;
                     if (this.getVacancyId(btn) === vacancyId) return btn;
                 }
                 return null;
@@ -980,17 +1051,14 @@
             getAvailableButtons() {
                 if (window.location.href.includes('/applicant/vacancy_response')) return [];
                 return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
-                    if (!b.offsetParent || b.style.display === 'none') return false;
+                    if (!this._isVisible(b) || b.style.display === 'none') return false;
                     if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
                     if (this.isFilteredOrganization(b)) return false;
                     const vid = this.getVacancyId(b);
                     if (vid && this.skippedVacancies.has('id_' + vid)) return false;
                     const empId = this.getEmployerIdFromCard(b);
                     if (empId && this.testEmployerIds.has(String(empId))) return false;
-                    if (this.settings.skipResponded) {
-                        const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                        if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return false;
-                    }
+                    if (this.settings.skipResponded && this._isRespondedCard(b)) return false;
                     return true;
                 });
             }
@@ -1010,15 +1078,12 @@
                 const vacancyTitle = bot.getVacancyTitleFromCard(b);
 
                 // Быстрые фильтры (null = пропуск без счётчика ошибок)
-                if (!b.offsetParent || b.style.display === 'none') return null;
+                if (!bot._isVisible(b) || b.style.display === 'none') return null;
                 if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
                 if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
                 if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
-                if (bot.settings.skipResponded) {
-                    const _p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                    if (_p && ((_p.textContent || '').includes('Вы откликнулись') || _p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) return null;
-                }
+                if (bot.settings.skipResponded && bot._isRespondedCard(b)) return null;
 
                 // Случайный пропуск 5% вакансий — имитирует поведение реального пользователя
                 if (Math.random() < 0.05) {
@@ -1040,7 +1105,7 @@
                 bot.updateStatus('Стр.' + bot.currentPage + ' | ' + (i + 1) + '/' + t + ' (' + _progressPct + '%) — ' + (o || 'Обработка...'));
 
                 let targetBtn = b;
-                if (!b.offsetParent) {
+                if (!bot._isVisible(b)) {
                     // [FIX] Без vacancyId targetBtn оставался прежней — уже невидимой —
                     // кнопкой, и бот кликал по элементу, которого нет на экране.
                     targetBtn = vacancyId ? bot.findButtonByVacancyId(vacancyId) : null;
@@ -1111,17 +1176,21 @@
             }
 
             async _waitForModal(timeoutMs) {
+                // [FIX] Добавлен [role="dialog"][aria-modal="true"] — именно такую роль
+                // имеет форма отклика hh.ru (alertdialog используется только для алертов),
+                // а мёртвый vacancy-response-popup-close заменён на актуальный.
                 const selectors = [
                     '[data-qa="vacancy-response-submit-popup"]',
-                    '[data-qa="vacancy-response-popup-close"]',
+                    '[role="dialog"][aria-modal="true"]',
                     '[role="alertdialog"][aria-modal="true"]',
+                    '[data-qa="response-popup-close"]',
                     '[data-qa="vacancy-response-popup-form-letter-input"]'
                 ];
                 const start = Date.now();
                 while (Date.now() - start < timeoutMs) {
                     for (const sel of selectors) {
                         const el = document.querySelector(sel);
-                        if (el && el.offsetParent) return true;
+                        if (this._isVisible(el)) return true;
                     }
                     await this.wait(100);
                 }
@@ -1160,7 +1229,7 @@
 
                         if (!bt.length) {
                             const allBtns = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-                            const visibleBtns = Array.from(allBtns).filter(b => b.offsetParent && b.style.display !== 'none');
+                            const visibleBtns = Array.from(allBtns).filter(b => bot._isVisible(b) && b.style.display !== 'none');
                             if (allBtns.length > 0 && visibleBtns.length > 0) {
                                 bot.updateStatus('Стр.' + bot.currentPage + ' | Все ' + visibleBtns.length + ' отфильтрованы/пропущены');
                             } else {
@@ -1369,7 +1438,7 @@
                 bt.forEach((b, i) => {
                     const o = this.getOrganizationNameFromCard(b);
                     let reason = null;
-                    if (!b.offsetParent || b.style.display === 'none') {
+                    if (!this._isVisible(b) || b.style.display === 'none') {
                         reason = 'скрыта';
                     } else if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) {
                         reason = 'внешняя ссылка';
@@ -1383,11 +1452,8 @@
                             const empId = this.getEmployerIdFromCard(b);
                             if (empId && this.testEmployerIds.has(String(empId))) {
                                 reason = 'работодатель с тестом (id=' + empId + ')';
-                            } else if (this.settings.skipResponded) {
-                                const p = b.closest('.vacancy-serp-item') || b.closest('[class*="vacancy-card"]');
-                                if (p && ((p.textContent || '').includes('Вы откликнулись') || p.querySelector('[data-qa="vacancy-serp__vacancy_responded"]'))) {
-                                    reason = 'уже откликнулись';
-                                }
+                            } else if (this.settings.skipResponded && this._isRespondedCard(b)) {
+                                reason = 'уже откликнулись';
                             }
                         }
                     }
@@ -1400,7 +1466,7 @@
 
             analyzePage() {
                 const all = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
-                const visible = Array.from(all).filter(b => b.offsetParent && b.style.display !== 'none');
+                const visible = Array.from(all).filter(b => this._isVisible(b) && b.style.display !== 'none');
                 this.updateStatus('АНАЛИЗ:\nВсего кнопок: ' + all.length + '\nВидимых: ' + visible.length + '\nДоступно: ' + this.getAvailableButtons().length + '\nСтр. ' + this.currentPage + '\n\u2705' + this.stats.success + ' \u274C' + this.stats.failed + ' \u23ED\uFE0F' + this.stats.skipped);
             }
 
