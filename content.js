@@ -125,7 +125,7 @@
     // БЛОК 3: ЗАПУСК БОТА
     // ───────────────────────────────────────────────────
     waitForCore().then(() => {
-        const VERSION = '2.4';
+        const VERSION = '2.5';
         console.debug('=== HH Авто-отклик v' + VERSION + ' ===');
 
         // ── Хранилище: chrome.storage.local вместо localStorage ──────────────
@@ -167,7 +167,10 @@
                 this.settings = {
                     autoNextPage: true,
                     skipResponded: true,
-                    delay: 0.5,
+                    // 0.5 с — самый агрессивный из допустимых темпов. Лимит hh.ru
+                    // 200 откликов в сутки всё равно не даёт разогнаться, а iframe
+                    // на каждую вакансию больше не грузится — спешить незачем.
+                    delay: 1.5,
                     filterOrganizations: true,
                     autoRememberOrganizations: true,
                     skipCoverLetter: false,
@@ -176,15 +179,135 @@
                     // [NEW] Ночной режим — пауза по расписанию
                     nightModeEnabled: false,
                     nightModeFrom: 23,   // час начала паузы (0-23)
-                    nightModeTo: 8       // час конца паузы (0-23)
+                    nightModeTo: 8,      // час конца паузы (0-23)
+                    // [NEW] Доля вакансий, которые бот намеренно пропускает «по-человечески».
+                    // Раньше 5% было зашито константой: из 200 откликов в сутки десяток
+                    // просто терялся, и понять почему по интерфейсу было нельзя.
+                    randomSkipPercent: 5,
+
+                    // [NEW] Фильтры по данным вакансии из стейта страницы.
+                    // hh.ru отдаёт по каждой вакансии структурную запись; раньше
+                    // расширение читало из неё только признак теста, а фильтровало
+                    // лишь по названию работодателя и стоп-словам в заголовке.
+                    sortByCompetition: true,   // сначала вакансии с меньшим числом откликов
+                    maxCompetitors: 0,         // 0 = без ограничения
+                    minSalary: 0,              // 0 = не важно
+                    salaryRequired: false,
+                    workFormat: 'any',         // any | remote | remote_hybrid | on_site
+                    maxExperience: 'any',      // any | noExperience | between1And3 | between3And6
+                    maxAgeDays: 0,             // 0 = без ограничения
+                    skipInternship: false,
+                    skipClosed: true,
+
+                    // [NEW] Совпадение по навыкам. hh.ru печатает в карточке два
+                    // сниппета — обязанности и требования (проверено: есть у 50 из 50
+                    // карточек, в среднем 301 символ). Пересечение с вашими навыками
+                    // даёт и фильтр, и сортировку, и подстановку {навыки} в письмо.
+                    sortBySkills: false,
+                    minSkillMatch: 0,          // 0 = не фильтровать по навыкам
+                    // [NEW] Уведомлять о новых приглашениях
+                    notifyInvites: false,
+
+                    // [NEW] Серверные фильтры hh.ru. Замер на живой выдаче python/Москва:
+                    // базовый запрос — медиана 273 отклика на вакансию, 6 вакансий из 50
+                    // имеют меньше 20 откликов. Тот же запрос с order_by=publication_time —
+                    // медиана 13, и уже 32 из 50 с менее чем 20 откликами. Охват при этом
+                    // не падает: обе выдачи — те же 3719 вакансий, меняется только порядок.
+                    // Фильтровать на стороне hh.ru кратно выгоднее, чем выбрасывать
+                    // 45 карточек из 50 уже после загрузки страницы.
+                    orderByFresh: true,           // order_by=publication_time
+                    labelNoAgency: false,         // label=not_from_agency
+                    labelAccreditedIt: false,     // label=accredited_it
+                    labelLowPerformance: false,   // label=low_performance («меньше 10 откликов»)
+                    serverSideFilters: true,      // переносить формат/опыт/зарплату/свежесть в URL
+
+                    // [NEW] Возможности, найденные в самом hh.ru:
+                    // «Поднять в поиске» (data-qa="resume-update-button") поднимает
+                    // резюме в выдаче для работодателей — то, что платные сервисы
+                    // продают отдельной услугой. Кулдаун держит сам hh.ru.
+                    autoBumpResume: false,
+                    // Вакансии с тестовым заданием бот пропускает — но хорошие из них
+                    // жалко терять. Кладём их в избранное hh.ru для ручного разбора.
+                    favoriteSkippedTests: false,
+                    // [NEW] Точное сопоставление навыков по странице вакансии.
+                    // На /vacancy/<id> лежит keySkills.keySkill — структурный список
+                    // требуемых навыков (замер: заполнен у 5 из 7 вакансий, 2-13 штук)
+                    // плюс полное описание. Это точнее сниппета из карточки, но стоит
+                    // одного запроса на вакансию (~0.76 с), поэтому включается отдельно
+                    // и только для вакансий, уже прошедших все дешёвые фильтры.
+                    deepMatch: false,
+                    // [NEW] Рейтинг работодателя. hh.ru печатает его прямо в карточке
+                    // (data-qa="company-review-rating-value") вместе с числом отзывов —
+                    // замер: есть у 48 из 50 карточек, разброс 3.2-4.9.
+                    // Рейтинг по двум-трём отзывам — шум, поэтому фильтр применяется
+                    // только когда отзывов достаточно.
+                    minEmployerRating: 0,      // 0 = не фильтровать
+                    minReviewsForRating: 3,
+                    // [NEW] Возраст вакансии по ДАТЕ СОЗДАНИЯ, а не публикации.
+                    // hh.ru показывает всем publicationTime («опубликовано сегодня»),
+                    // но в стейте рядом лежит creationTime. Разрыв между ними — это
+                    // сколько вакансия реально висит, её перевыкладывают заново.
+                    // Замер на живой выдаче: 18 из 50 созданы в день публикации,
+                    // 11 висят дольше месяца, рекорд — 114 дней при «опубликовано
+                    // сегодня» и 82 откликах. Сортировка «сначала свежие» поднимает
+                    // такие вакансии наверх как новые, поэтому фильтр особенно нужен.
+                    maxRepostDays: 0,          // 0 = не фильтровать
+
+                    // [NEW] Активность рекрутёра. В стейте выдачи у КАЖДОЙ вакансии
+                    // есть employerManager.latestActivity (online/offline).
+                    // Замер на 100 вакансиях: у «онлайн» медиана откликов 72,
+                    // у «офлайн» — 237, разница в 3,3 раза. Вакансии, за которыми
+                    // сейчас следят, и разбирают быстрее.
+                    preferManagerOnline: false,   // поднимать такие выше в очереди
+                    onlyManagerOnline: false,     // жёсткий фильтр: только онлайн
+
+                    // [NEW] Доля откликов, которые работодатель реально разбирает.
+                    // hh.ru печатает её на странице «Отклики» («Разбирает 70% откликов»)
+                    // и отдаёт прямо в HTML. Показатель привязан к РАБОТОДАТЕЛЮ, а не к
+                    // вакансии — проверено: у одного employerId процент одинаков на разных
+                    // вакансиях. Значит, узнав его один раз, можно судить и о других его
+                    // вакансиях. До первого отклика он неизвестен, поэтому фильтр работает
+                    // накопительно: бот запоминает и больше не тратит отклики впустую.
+                    minReviewRate: 0,             // 0 = не фильтровать, иначе процент
+
+                    // [NEW] Искать слово только в НАЗВАНИИ вакансии (search_field=name).
+                    // По умолчанию hh.ru ищет по всему тексту, и в выдачу по запросу
+                    // «javascript» попадают вакансии, где слово встретилось где угодно.
+                    // Замер на живом прогоне: бот отправил отклики на «SEO-специалиста»,
+                    // «Руководителя технической поддержки» и даже «Машиниста экскаватора».
+                    // С search_field=name выдача — Backend Node.js, Fullstack JS/TS,
+                    // «Главный разработчик Javascript». Включено по умолчанию: цена
+                    // ошибки здесь выше, чем потеря пары релевантных вакансий.
+                    searchInTitleOnly: true
                 };
                 this.filteredOrganizations = [];
                 this.autoFilteredOrganizations = [];
                 // [NEW] Стоп-слова в названии вакансии
                 this.titleStopWords = [];
+                // [NEW] Позитивный фильтр: если список непуст, название вакансии
+                // обязано содержать хотя бы одно из слов. Чёрный список отсекает
+                // мусор поштучно, белый — сразу всё, что не по профилю.
+                this.titleRequiredWords = [];
+                // [NEW] Мои навыки — по ним считается совпадение с вакансией.
+                this.mySkills = [];
+                // [NEW] Очередь поисковых запросов: один URL на строку.
+                this.searchQueue = [];
+                // [NEW] Снимок статусов откликов — чтобы заметить НОВОЕ приглашение.
+                this.inviteSnapshot = null;
+                // Когда резюме поднимали в последний раз (мс).
+                this.lastBump = 0;
+                // [NEW] employerId -> процент разбираемых откликов, накапливается.
+                this.employerRates = {};
+                // [NEW] Второй вариант письма для A/B. Пустой — чередования нет.
+                this.coverLetterB = '';
+                // [NEW] Журнал отправленных откликов: на нём держатся отчёт
+                // по конверсии и выгрузка в CSV.
+                this.responseLog = [];
                 // [NEW] Суточный счётчик откликов — hh.ru ограничивает 200 в СУТКИ
                 this.dailyStats = { date: null, count: 0 };
                 this.theme = 'dark';
+                // [NEW] Активная вкладка панели.
+                this.activeTab = 'filters';
                 this.resumeSelectedFlag = false;
                 this.settingsCollapsed = true;
                 this.consecutiveErrors = 0;
@@ -217,8 +340,14 @@
                 tryRestoreBot();
                 this.createInterface();
                 this.setupEventListeners();
-                const W = window.__HH_WASM__;
-                this.updateStatus('v' + VERSION + ' Готов' + (W ? ' [WASM]' : ' [JS]'));
+                // Версия и режим WASM показаны в шапке и подвале панели —
+                // дублировать их в статусе незачем.
+                this.updateStatus('Готов к работе');
+                // Метаданные тянем сразу — счётчик «Найдено» должен учитывать тесты
+                // ещё до запуска, а не обещать вакансии, которые бот пропустит.
+                this._loadVacancyMeta().then(() => this.updateCount()).catch(() => {});
+                this._startInviteWatcher();
+                this._startBumpWatcher();
             }
 
             // [NEW] Загружаем всё из chrome.storage за один запрос
@@ -247,6 +376,34 @@
                             merged.nightModeEnabled = !!merged.nightModeEnabled;
                             merged.nightModeFrom = clampNum(merged.nightModeFrom, 0, 23, 23, true);
                             merged.nightModeTo   = clampNum(merged.nightModeTo,   0, 23, 8,  true);
+                            merged.randomSkipPercent = clampNum(merged.randomSkipPercent, 0, 50, 5, true);
+                            merged.maxCompetitors = clampNum(merged.maxCompetitors, 0, 100000, 0, true);
+                            merged.minSalary      = clampNum(merged.minSalary, 0, 100000000, 0, true);
+                            merged.maxAgeDays     = clampNum(merged.maxAgeDays, 0, 365, 0, true);
+                            merged.sortByCompetition = !!merged.sortByCompetition;
+                            merged.salaryRequired    = !!merged.salaryRequired;
+                            merged.skipInternship    = !!merged.skipInternship;
+                            merged.skipClosed        = !!merged.skipClosed;
+                            merged.sortBySkills      = !!merged.sortBySkills;
+                            merged.notifyInvites     = !!merged.notifyInvites;
+                            merged.orderByFresh        = !!merged.orderByFresh;
+                            merged.labelNoAgency       = !!merged.labelNoAgency;
+                            merged.labelAccreditedIt   = !!merged.labelAccreditedIt;
+                            merged.labelLowPerformance = !!merged.labelLowPerformance;
+                            merged.serverSideFilters   = !!merged.serverSideFilters;
+                            merged.autoBumpResume      = !!merged.autoBumpResume;
+                            merged.favoriteSkippedTests = !!merged.favoriteSkippedTests;
+                            merged.deepMatch = !!merged.deepMatch;
+                            merged.minEmployerRating = clampNum(merged.minEmployerRating, 0, 5, 0);
+                            merged.minReviewsForRating = clampNum(merged.minReviewsForRating, 1, 100, 3, true);
+                            merged.maxRepostDays = clampNum(merged.maxRepostDays, 0, 365, 0, true);
+                            merged.preferManagerOnline = !!merged.preferManagerOnline;
+                            merged.onlyManagerOnline   = !!merged.onlyManagerOnline;
+                            merged.minReviewRate = clampNum(merged.minReviewRate, 0, 100, 0, true);
+                            merged.searchInTitleOnly = !!merged.searchInTitleOnly;
+                            merged.minSkillMatch     = clampNum(merged.minSkillMatch, 0, 20, 0, true);
+                            if (!['any','remote','remote_hybrid','on_site'].includes(merged.workFormat)) merged.workFormat = 'any';
+                            if (!['any','noExperience','between1And3','between3And6'].includes(merged.maxExperience)) merged.maxExperience = 'any';
                             this.settings = merged;
                         }
                         if (p.stats && typeof p.stats === 'object') {
@@ -257,9 +414,18 @@
                             };
                         }
                         if (p.theme === 'dark' || p.theme === 'light') this.theme = p.theme;
+                        if (typeof p.activeTab === 'string') this.activeTab = p.activeTab;
                         if (Array.isArray(p.filteredOrganizations)) this.filteredOrganizations = p.filteredOrganizations;
-                        if (Array.isArray(p.autoFilteredOrganizations)) this.autoFilteredOrganizations = p.autoFilteredOrganizations;
+                        if (Array.isArray(p.autoFilteredOrganizations)) { this.autoFilteredOrganizations = p.autoFilteredOrganizations; this._autoFilterDirty = true; }
                         if (Array.isArray(p.titleStopWords)) this.titleStopWords = p.titleStopWords.filter(x => typeof x === 'string');
+                        if (Array.isArray(p.titleRequiredWords)) this.titleRequiredWords = p.titleRequiredWords.filter(x => typeof x === 'string');
+                        if (Array.isArray(p.mySkills)) this.mySkills = p.mySkills.filter(x => typeof x === 'string');
+                        if (Array.isArray(p.searchQueue)) this.searchQueue = p.searchQueue.filter(x => typeof x === 'string');
+                        if (p.inviteSnapshot && typeof p.inviteSnapshot === 'object') this.inviteSnapshot = p.inviteSnapshot;
+                        if (typeof p.lastBump === 'number') this.lastBump = p.lastBump;
+                        if (p.employerRates && typeof p.employerRates === 'object') this.employerRates = p.employerRates;
+                        if (typeof p.coverLetterB === 'string') this.coverLetterB = p.coverLetterB;
+                        if (Array.isArray(p.responseLog)) this.responseLog = p.responseLog.filter(x => x && typeof x === 'object');
                         if (p.dailyStats && typeof p.dailyStats === 'object') {
                             this.dailyStats = {
                                 date: typeof p.dailyStats.date === 'string' ? p.dailyStats.date : null,
@@ -289,6 +455,9 @@
             suspend() {
                 this.stopAutoProcess();
                 if (this._updateCountInterval) { clearInterval(this._updateCountInterval); this._updateCountInterval = null; }
+                if (this._inviteInterval) { clearInterval(this._inviteInterval); this._inviteInterval = null; }
+                if (this._bumpInterval) { clearInterval(this._bumpInterval); this._bumpInterval = null; }
+                clearTimeout(this._countTimer);
             }
 
             destroy() {
@@ -327,9 +496,18 @@
                         settings: this.settings,
                         stats: this.stats,
                         theme: this.theme,
+                        activeTab: this.activeTab,
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
                         titleStopWords: this.titleStopWords,
+                        titleRequiredWords: this.titleRequiredWords,
+                        mySkills: this.mySkills,
+                        searchQueue: this.searchQueue,
+                        inviteSnapshot: this.inviteSnapshot,
+                        lastBump: this.lastBump,
+                        employerRates: this.employerRates,
+                        coverLetterB: this.coverLetterB,
+                        responseLog: this.responseLog,
                         dailyStats: this.dailyStats,
                         currentPage: this.currentPage,
                         sessionLog: this.sessionLog
@@ -348,6 +526,11 @@
                         filteredOrganizations: this.filteredOrganizations,
                         autoFilteredOrganizations: this.autoFilteredOrganizations,
                         titleStopWords: this.titleStopWords,
+                        titleRequiredWords: this.titleRequiredWords,
+                        mySkills: this.mySkills,
+                        searchQueue: this.searchQueue,
+                        coverLetterB: this.coverLetterB,
+                        responseLog: this.responseLog,
                         dailyStats: this.dailyStats,
                         skippedVacancies: [...this.skippedVacancies],
                         testEmployerIds: [...this.testEmployerIds],
@@ -388,6 +571,7 @@
                                 merged.resumeTitleMatching = clampNum(merged.resumeTitleMatching, 0, 100, 70, true);
                                 merged.nightModeFrom = clampNum(merged.nightModeFrom, 0, 23, 23, true);
                                 merged.nightModeTo   = clampNum(merged.nightModeTo,   0, 23, 8,  true);
+                                merged.randomSkipPercent = clampNum(merged.randomSkipPercent, 0, 50, 5, true);
                                 for (const k of ['autoNextPage','skipResponded','filterOrganizations',
                                                  'autoRememberOrganizations','skipCoverLetter',
                                                  'autoSelectResume','nightModeEnabled']) {
@@ -397,8 +581,13 @@
                             }
                             if (typeof data.coverLetter === 'string') this.coverLetter = data.coverLetter;
                             if (Array.isArray(data.filteredOrganizations)) this.filteredOrganizations = data.filteredOrganizations.filter(x => typeof x === 'string');
-                            if (Array.isArray(data.autoFilteredOrganizations)) this.autoFilteredOrganizations = data.autoFilteredOrganizations.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.autoFilteredOrganizations)) { this.autoFilteredOrganizations = data.autoFilteredOrganizations.filter(x => typeof x === 'string'); this._autoFilterDirty = true; }
                             if (Array.isArray(data.titleStopWords)) this.titleStopWords = data.titleStopWords.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.titleRequiredWords)) this.titleRequiredWords = data.titleRequiredWords.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.mySkills)) this.mySkills = data.mySkills.filter(x => typeof x === 'string');
+                            if (Array.isArray(data.searchQueue)) this.searchQueue = data.searchQueue.filter(x => typeof x === 'string');
+                            if (typeof data.coverLetterB === 'string') this.coverLetterB = data.coverLetterB;
+                            if (Array.isArray(data.responseLog)) this.responseLog = data.responseLog.filter(x => x && typeof x === 'object');
                             if (Array.isArray(data.skippedVacancies)) this.skippedVacancies = new Set(data.skippedVacancies.filter(x => typeof x === 'string' && x.startsWith('id_')));
                             if (Array.isArray(data.testEmployerIds)) this.testEmployerIds = new Set(data.testEmployerIds.map(String));
                             if (Array.isArray(data.sessionLog)) this.sessionLog = data.sessionLog;
@@ -474,7 +663,12 @@
             _dailyCount() {
                 const today = this._todayKey();
                 if (!this.dailyStats || this.dailyStats.date !== today) {
+                    // Сутки сменились — обнуляем и СРАЗУ сохраняем. Раньше сброс жил
+                    // только в памяти до ближайшего debouncedSave(); если вкладку
+                    // закрыть раньше, вчерашние 198 подтягивались обратно и бот
+                    // считал сегодняшний лимит исчерпанным.
                     this.dailyStats = { date: today, count: 0 };
+                    this.debouncedSave();
                 }
                 return this.dailyStats.count;
             }
@@ -488,20 +682,416 @@
             // [NEW] Подстановка в сопроводительное письмо: {вакансия} и {компания}
             // (а также английские {vacancy} / {company}). Письмо под каждую вакансию
             // читается живее шаблонного и заметно повышает шанс ответа.
-            _renderCoverLetter(vacancyTitle, organization) {
+            // [NEW] Выбор варианта письма. Пока B пустой — всегда A.
+            // Чередуем строго поровну: сравнивать два текста можно только на
+            // сопоставимых выборках, случайный выбор дал бы перекос.
+            _pickLetter() {
+                const b = String(this.coverLetterB || '').trim();
+                if (!b) return { text: this.coverLetter, variant: 'A' };
+                this._letterFlip = !this._letterFlip;
+                return this._letterFlip
+                    ? { text: this.coverLetter,  variant: 'A' }
+                    : { text: this.coverLetterB, variant: 'B' };
+            }
+
+            // [NEW] Журнал отправленных откликов — источник для отчёта и CSV.
+            _logResponse(vacancyId, employerId, org, title, meta) {
+                const wrote = !this.settings.skipCoverLetter || !!(meta && meta.letterRequired);
+                this.responseLog.unshift({
+                    t: Date.now(),
+                    v: vacancyId ? String(vacancyId) : null,
+                    e: employerId ? String(employerId) : null,
+                    o: org || '',
+                    n: title || '',
+                    l: wrote ? ((this._currentLetter && this._currentLetter.variant) || 'A') : '—',
+                    w: wrote,
+                    r: (meta && typeof meta.responses === 'number') ? meta.responses : null
+                });
+                if (this.responseLog.length > 1000) this.responseLog.length = 1000;
+                this.debouncedSave();
+            }
+
+            // Массив откликов лежит в стейте страницы /applicant/negotiations,
+            // но под ключом с хешем — ищем структурно, по форме записи.
+            _findNegotiations(root) {
+                let out = null;
+                const walk = (o, d) => {
+                    if (out || !o || typeof o !== 'object' || d > 5) return;
+                    if (Array.isArray(o)) {
+                        if (o.length && o[0] && typeof o[0] === 'object' &&
+                            'vacancyId' in o[0] && 'lastState' in o[0]) { out = o; return; }
+                        return;
+                    }
+                    for (const k of Object.keys(o)) { try { walk(o[k], d + 1); } catch(e) {} }
+                };
+                walk(root, 0);
+                return out;
+            }
+
+            // ═══ ПОДНЯТИЕ РЕЗЮМЕ В ПОИСКЕ ═══
+            // На /applicant/resumes у каждого резюме есть родная кнопка
+            // data-qa="resume-update-button" («Поднять в поиске»). Жмём именно её,
+            // а не внутренний /applicant/resumes/touch: тот требует параметров
+            // fingerprintSp и fingerprintIteration2, которые считает сам сайт, —
+            // воспроизводить их снаружи и хрупко, и незачем.
+            async bumpResumes(silent) {
+                if (!silent) this.updateStatus('Открываю список резюме...');
+                return new Promise((resolve) => {
+                    const f = document.createElement('iframe');
+                    f.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1200px;height:900px;opacity:0;pointer-events:none;';
+                    f.src = 'https://hh.ru/applicant/resumes';
+                    let done = false;
+                    const finish = (msg, n) => {
+                        if (done) return; done = true;
+                        try { f.remove(); } catch(e) {}
+                        if (!silent || n) this.updateStatus(msg);
+                        resolve(n || 0);
+                    };
+                    f.addEventListener('load', () => {
+                        (async () => {
+                            try {
+                                await this.wait(2500);
+                                const d = f.contentDocument;
+                                if (!d || !d.body) return finish('Не удалось открыть страницу резюме', 0);
+                                const btns = Array.from(d.querySelectorAll('[data-qa="resume-update-button"]'))
+                                    .filter(b => !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true');
+                                if (!btns.length) return finish('Поднимать нечего — интервал hh.ru ещё не прошёл', 0);
+                                let n = 0;
+                                for (const b of btns) {
+                                    try { b.click(); n++; } catch(e) {}
+                                    await this.wait(1200);
+                                }
+                                await this.wait(1500);
+                                this.lastBump = Date.now();
+                                this.debouncedSave();
+                                finish('Резюме поднято: ' + n + ' \u2705', n);
+                            } catch(e) { finish('Ошибка поднятия: ' + (e && e.message ? e.message : e), 0); }
+                        })();
+                    }, { once: true });
+                    setTimeout(() => finish('Таймаут поднятия резюме', 0), 40000);
+                    if (document.body) document.body.appendChild(f);
+                    else finish('Страница не готова', 0);
+                });
+            }
+
+            _startBumpWatcher() {
+                if (this._bumpInterval) { clearInterval(this._bumpInterval); this._bumpInterval = null; }
+                if (!this.settings.autoBumpResume) return;
+                const FOUR_H = 4 * 3600 * 1000;
+                const tick = () => {
+                    if (Date.now() - (this.lastBump || 0) < FOUR_H) return;
+                    this.bumpResumes(true).catch(() => {});
+                };
+                this._bumpInterval = setInterval(tick, 30 * 60 * 1000);   // проверяем раз в полчаса
+                setTimeout(tick, 20000);
+            }
+
+            // [NEW] Избранное hh.ru — родная звёздочка в карточке.
+            _addToFavorites(b) {
+                try {
+                    const card = this._getCard(b);
+                    if (!card) return false;
+                    const fav = card.querySelector('[data-qa^="vacancy-search-mark-favorite_"]');
+                    if (!fav) return false;
+                    // _false = ещё не в избранном; _true трогать нельзя, снимет отметку
+                    if (!/_false$/.test(fav.getAttribute('data-qa') || '')) return false;
+                    fav.click();
+                    return true;
+                } catch(e) { return false; }
+            }
+
+            // [NEW] Импорт автопоисков hh.ru в очередь запросов.
+            async importSavedSearches() {
+                this.updateStatus('Читаю автопоиски с hh.ru...');
+                try {
+                    const html = await (await fetch('https://hh.ru/applicant/autosearch', { credentials: 'include' })).text();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const raw = Array.from(doc.querySelectorAll('a[href*="/search/vacancy?"]'))
+                        .map(a => a.getAttribute('href'))
+                        .filter(h => h && h.indexOf('=') > 0);
+                    const urls = [];
+                    for (const h of raw) {
+                        let u;
+                        try { u = new URL(h, 'https://hh.ru'); } catch(e) { continue; }
+                        const p = u.searchParams;
+                        // Ссылка без единого условия поиска — это не автопоиск,
+                        // а служебный переход вроде ?hhtmFrom=vacancy_autosearch_list
+                        const meaningful = [...p.keys()].filter(k => !/^hhtm/i.test(k));
+                        if (!meaningful.length) continue;
+                        const clean = u.toString();
+                        if (urls.indexOf(clean) < 0) urls.push(clean);
+                    }
+                    if (!urls.length) {
+                        this.updateStatus('Автопоисков не нашлось.\nСоздайте их на hh.ru: поиск \u2192 «Сохранить поиск».');
+                        return;
+                    }
+                    let added = 0;
+                    for (const u of urls) {
+                        if (this.searchQueue.indexOf(u) < 0) { this.searchQueue.push(u); added++; }
+                    }
+                    this.saveSettings();
+                    this.createInterface();
+                    this.setupEventListeners();
+                    this.updateStatus('Добавлено в очередь: ' + added + ' из ' + urls.length + ' найденных');
+                } catch(e) {
+                    this.updateStatus('Не удалось прочитать автопоиски: ' + (e && e.message ? e.message : e));
+                }
+            }
+
+            // [NEW] Чёрный список hh.ru — родная кнопка «скрыть» в карточке.
+            // Только вручную и с подтверждением: это меняет аккаунт, работодатели
+            // пропадут из выдачи до очистки списка на hh.ru.
+            async blacklistFilteredEmployers() {
+                const targets = Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]'))
+                    .filter(b => this.isFilteredOrganization(b));
+                if (!targets.length) {
+                    this.updateStatus('На странице нет вакансий, отсеянных фильтром организаций');
+                    return;
+                }
+                if (!confirm('Скрыть на hh.ru работодателей у ' + targets.length + ' вакансий?\n\n' +
+                             'Это изменит ваш аккаунт: они исчезнут из вашей выдачи.\n' +
+                             'Отменить можно на hh.ru \u2192 Чёрный список работодателей.')) return;
+                let n = 0;
+                for (const b of targets) {
+                    const card = this._getCard(b);
+                    const btn = card && card.querySelector('[data-qa="vacancy__blacklist-show-add"]');
+                    if (btn) { try { btn.click(); n++; } catch(e) {} await this.wait(700); }
+                }
+                this.updateStatus('Скрыто работодателей: ' + n + '\nОтменить — hh.ru \u2192 Чёрный список');
+            }
+
+            // [NEW] Проверка новых приглашений. Снимок статусов хранится между
+            // запусками; уведомление шлётся только когда отклик ПЕРЕШЁЛ в INTERVIEW,
+            // а не при первом снятии снимка — иначе первый же запуск сообщил бы
+            // обо всех старых приглашениях сразу.
+            async _checkInvites() {
+                if (!this.settings.notifyInvites) return;
+                try {
+                    const html = await (await fetch('https://hh.ru/applicant/negotiations', { credentials: 'include' })).text();
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const st = doc.getElementById('HH-Lux-InitialState');
+                    if (!st) return;
+                    const raw = st.content ? st.content.textContent : st.textContent;
+                    const arr = this._findNegotiations(JSON.parse(raw));
+                    if (!arr || !arr.length) return;
+                    const prev = this.inviteSnapshot;
+                    const now = {};
+                    const fresh = [];
+                    for (const n of arr) {
+                        const k = String(n.vacancyId);
+                        now[k] = n.lastState;
+                        if (n.lastState === 'INTERVIEW' && prev && prev[k] && prev[k] !== 'INTERVIEW') fresh.push(k);
+                    }
+                    this.inviteSnapshot = now;
+                    this.debouncedSave();
+                    if (prev && fresh.length) {
+                        this._sendNotification(
+                            'Новое приглашение на hh.ru \uD83C\uDF89',
+                            fresh.length === 1 ? 'Вас пригласили — откройте «Отклики»'
+                                               : 'Новых приглашений: ' + fresh.length
+                        );
+                    }
+                } catch(e) {}
+            }
+
+            _startInviteWatcher() {
+                if (this._inviteInterval) { clearInterval(this._inviteInterval); this._inviteInterval = null; }
+                if (this._bumpInterval) { clearInterval(this._bumpInterval); this._bumpInterval = null; }
+                if (!this.settings.notifyInvites) return;
+                // Раз в 15 минут: чаще незачем, работодатели отвечают не секундами.
+                this._inviteInterval = setInterval(() => this._checkInvites().catch(() => {}), 900000);
+                setTimeout(() => this._checkInvites().catch(() => {}), 10000);
+            }
+
+            // [NEW] Отчёт по конверсии. Бот считал отправленные отклики, но не знал,
+            // работают ли они. hh.ru отдаёт статус каждого отклика (INTERVIEW —
+            // позвали, DISCARD — отказ, RESPONSE — молчат), а журнал знает, каким
+            // письмом отклик уходил. Вместе это показывает, какой текст работает.
+            async showConversion() {
+                this.updateStatus('Загружаю статусы откликов с hh.ru...');
+                const byVacancy = new Map();
+                for (const r of this.responseLog) if (r && r.v) byVacancy.set(String(r.v), r);
+
+                const stats = {}, byRes = {}, byComp = {};
+                const mk = (box, key) => box[key] || (box[key] = { total: 0, INTERVIEW: 0, DISCARD: 0, RESPONSE: 0 });
+                const bump = (variant, state) => { const s = mk(stats, variant); s.total++; if (s[state] !== undefined) s[state]++; };
+                const bumpRes = (id, state) => { const s = mk(byRes, id); s.total++; if (s[state] !== undefined) s[state]++; };
+                const bumpComp = (n, state) => {
+                    const b = n < 20 ? 'до 20' : n < 50 ? '20–50' : n < 200 ? '50–200' : n < 500 ? '200–500' : '500+';
+                    const s = mk(byComp, b); s.total++; if (s[state] !== undefined) s[state]++;
+                };
+
+                let seen = 0, matched = 0;
+                try {
+                    for (let page = 0; page < 5; page++) {
+                        const url = 'https://hh.ru/applicant/negotiations' + (page ? '?page=' + page : '');
+                        const html = await (await fetch(url, { credentials: 'include' })).text();
+                        const doc = new DOMParser().parseFromString(html, 'text/html');
+                        const st = doc.getElementById('HH-Lux-InitialState');
+                        if (!st) break;
+                        const raw = st.content ? st.content.textContent : st.textContent;
+                        const arr = this._findNegotiations(JSON.parse(raw));
+                        if (!arr || !arr.length) break;
+                        // Попутно снимаем «Разбирает N% откликов» — hh.ru отдаёт это
+                        // прямо в HTML, отдельного запроса не нужно.
+                        this._collectReviewRates(doc);
+                        for (const n of arr) {
+                            seen++;
+                            const rec = byVacancy.get(String(n.vacancyId));
+                            if (rec) matched++;
+                            bump(rec ? (rec.l || 'A') : 'не через бота', n.lastState);
+                            // Разбивка по резюме считается по данным hh.ru и работает
+                            // даже для откликов, отправленных до появления журнала.
+                            bumpRes(String(n.resumeId || '—'), n.lastState);
+                            // Разбивка по конкуренции — только для откликов из журнала:
+                            // сколько соперников было у вакансии в момент отправки.
+                            if (rec && typeof rec.r === 'number') bumpComp(rec.r, n.lastState);
+                        }
+                        if (arr.length < 20) break;
+                        await this.wait(500);
+                    }
+                } catch(e) {
+                    this.updateStatus('Не удалось загрузить отклики: ' + (e && e.message ? e.message : e));
+                    return;
+                }
+
+                if (!seen) { this.updateStatus('На hh.ru не найдено откликов'); return; }
+                const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '0%';
+                let out = 'КОНВЕРСИЯ (проверено откликов: ' + seen + ', из них через бота: ' + matched + ')\n';
+                const order = Object.keys(stats).sort();
+                for (const k of order) {
+                    const s = stats[k];
+                    out += '\n' + (k.length === 1 ? 'Письмо ' + k : k) + ': ' + s.total
+                         + '\n   \uD83D\uDC4D приглашений ' + s.INTERVIEW + ' (' + pct(s.INTERVIEW, s.total) + ')'
+                         + '  \u274C отказ ' + s.DISCARD
+                         + '  \u23F3 ждут ' + s.RESPONSE;
+                }
+                if (matched === 0) out += '\n\n* Журнал бота пуст — разбивка по письмам и конкуренции появится после новых откликов.';
+
+                const resKeys = Object.keys(byRes).sort((a, b) => byRes[b].total - byRes[a].total);
+                if (resKeys.length > 1) {
+                    out += '\n\nПО РЕЗЮМЕ (по данным hh.ru, включая ручные отклики):';
+                    for (const k of resKeys) {
+                        const r = byRes[k];
+                        out += '\n   #' + k + ': ' + r.total + ' \u2192 \uD83D\uDC4D' + r.INTERVIEW + ' (' + pct(r.INTERVIEW, r.total) + ')';
+                    }
+                }
+                const rates = Object.keys(this.employerRates).map(k => this.employerRates[k].rate).filter(x => typeof x === 'number');
+                if (rates.length) {
+                    rates.sort((a, b) => a - b);
+                    const med = rates[Math.floor(rates.length / 2)];
+                    const bad = rates.filter(x => x < 50).length;
+                    out += '\n\nРАЗБИРАЮТ ОТКЛИКИ (по ' + rates.length + ' работодателям):'
+                         + '\n   медиана ' + med + '%'
+                         + '\n   ниже 50%: ' + bad
+                         + '\n   ниже 30%: ' + rates.filter(x => x < 30).length
+                         + '\n   90% и выше: ' + rates.filter(x => x >= 90).length;
+                    if (!this.settings.minReviewRate) {
+                        out += '\n   * порог в «Фильтрах вакансии» отсеет их заранее';
+                    }
+                }
+                const compOrder = ['до 20', '20–50', '50–200', '200–500', '500+'];
+                const compKeys = compOrder.filter(k => byComp[k]);
+                if (compKeys.length) {
+                    out += '\n\nПО КОНКУРЕНЦИИ (откликов у вакансии на момент отправки):';
+                    for (const k of compKeys) {
+                        const r = byComp[k];
+                        out += '\n   ' + k + ': ' + r.total + ' \u2192 \uD83D\uDC4D' + r.INTERVIEW + ' (' + pct(r.INTERVIEW, r.total) + ')';
+                    }
+                }
+                this.updateStatus(out);
+            }
+
+            // [NEW] Снимает со страницы откликов процент разбираемых откликов
+            // и запоминает его по работодателю.
+            _collectReviewRates(doc) {
+                try {
+                    const nodes = doc.querySelectorAll('[data-qa="negotiations-employer-statistics"]');
+                    for (const n of nodes) {
+                        const m = String(n.textContent || '').match(/(\d{1,3})\s*%/);
+                        if (!m) continue;
+                        const rate = parseInt(m[1], 10);
+                        if (!Number.isFinite(rate)) continue;
+                        // Идём вверх, пока не найдём карточку со ссылкой на работодателя
+                        let el = n, empId = null;
+                        for (let i = 0; i < 8 && el; i++) {
+                            el = el.parentElement;
+                            if (!el) break;
+                            const a = el.querySelector('a[href*="/employer/"]');
+                            if (a) {
+                                const mm = (a.getAttribute('href') || '').match(/\/employer\/(\d+)/);
+                                if (mm) { empId = mm[1]; break; }
+                            }
+                        }
+                        if (empId) this.employerRates[empId] = { rate: rate, ts: Date.now() };
+                    }
+                    const keys = Object.keys(this.employerRates);
+                    if (keys.length > 2000) {
+                        // Держим последние 2000 — по времени последнего обновления
+                        keys.sort((a, b) => (this.employerRates[a].ts || 0) - (this.employerRates[b].ts || 0));
+                        for (const k of keys.slice(0, keys.length - 2000)) delete this.employerRates[k];
+                    }
+                    this.debouncedSave();
+                } catch(e) {}
+            }
+
+            // [NEW] Выгрузка журнала откликов в CSV — «я уже писал в эту контору?»
+            exportResponsesCsv() {
+                if (!this.responseLog.length) { this.updateStatus('Журнал откликов пуст'); return; }
+                try {
+                    const esc = (s) => '"' + String(s === null || s === undefined ? '' : s).replace(/"/g, '""') + '"';
+                    const rows = [['дата', 'id вакансии', 'компания', 'вакансия', 'вариант письма', 'письмо', 'откликов у вакансии'].map(esc).join(';')];
+                    for (const r of this.responseLog) {
+                        rows.push([
+                            new Date(r.t || 0).toISOString().slice(0, 16).replace('T', ' '),
+                            r.v, r.o, r.n, r.l, r.w ? 'да' : 'нет',
+                            (r.r === null || r.r === undefined) ? '' : r.r
+                        ].map(esc).join(';'));
+                    }
+                    // BOM — иначе Excel открывает кириллицу кракозябрами
+                    const blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'hh-otkliki-' + new Date().toISOString().slice(0, 10) + '.csv';
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    this.updateStatus('Выгружено откликов: ' + this.responseLog.length + ' \u2705');
+                } catch(e) { this.updateStatus('Ошибка выгрузки: ' + e.message); }
+            }
+
+            _renderCoverLetter(vacancyTitle, organization, text) {
+                const skills = (this._currentSkills && this._currentSkills.length)
+                    ? this._currentSkills.join(', ') : '';
                 const map = {
                     'вакансия': vacancyTitle || '',
                     'vacancy':  vacancyTitle || '',
                     'компания': organization || '',
-                    'company':  organization || ''
+                    'company':  organization || '',
+                    'навыки':   skills,
+                    'skills':   skills
                 };
-                let out = String(this.coverLetter || '').replace(
-                    /\{(вакансия|vacancy|компания|company)\}/gi,
-                    (m, k) => {
-                        const v = map[k.toLowerCase()];
-                        return (v === undefined || v === '') ? m : v;
-                    }
-                );
+                // [FIX пустая подстановка] Раньше незаполненный плейсхолдер оставался
+                // в тексте как есть, и работодатель получал письмо со строкой
+                // «Мой опыт: {навыки}». Теперь пустая подстановка помечается, а
+                // строка с ней целиком выбрасывается из письма.
+                // [FIX] Незаполненная подстановка раньше уходила работодателю как
+                // есть — строкой «Мой опыт: {навыки}». Теперь строка с ней
+                // выбрасывается целиком. Но если письмо состоит из одной строки,
+                // выброс обнулил бы его: пустое сопроводительное хуже плейсхолдера,
+                // поэтому в этом случае текст возвращается нетронутым.
+                const HOLE = '\u0000';
+                const src = String((text === undefined || text === null) ? (this.coverLetter || '') : text);
+                const RE = /\{(вакансия|vacancy|компания|company|навыки|skills)\}/gi;
+                const subst = (keepToken) => src.replace(RE, (m, k) => {
+                    const v = map[k.toLowerCase()];
+                    return (v === undefined || v === '') ? (keepToken ? m : HOLE) : v;
+                });
+                let out = subst(false);
+                if (out.indexOf(HOLE) >= 0) {
+                    const kept = out.split(/\r?\n/).filter(line => line.indexOf(HOLE) < 0).join('\n');
+                    out = kept.trim() ? kept.replace(/\n{3,}/g, '\n\n').trim() : subst(true);
+                }
                 // hh.ru не принимает письмо длиннее 2000 символов
                 if (out.length > 2000) out = out.slice(0, 2000);
                 return out;
@@ -663,6 +1253,22 @@
                 return (p.textContent || '').includes('Вы откликнулись');
             }
 
+            // [NEW] Признаки того, что hh.ru показал проверку вместо выдачи.
+            // Без этого бот при челлендже просто копил ошибки и перезагружал
+            // страницу по кругу — ровно то поведение, которое такую проверку и
+            // вызывает. Капчу расширение не решает и решать не должно: оно
+            // останавливается и зовёт человека.
+            _looksBlocked() {
+                try {
+                    if (document.querySelector('.g-recaptcha,[data-qa*="captcha" i],iframe[src*="recaptcha"],iframe[src*="hcaptcha"]')) return true;
+                    if (document.querySelector('[id*="ddg" i][class*="challenge" i],#ddg-challenge')) return true;
+                    if (document.querySelector('[data-qa="vacancy-serp__vacancy_response"]')) return false;
+                    const t = (document.body ? document.body.innerText : '').slice(0, 3000);
+                    if (/captcha|капч|подтвердите, что вы не робот|доступ ограничен|проверка браузера/i.test(t)) return true;
+                } catch(e) {}
+                return false;
+            }
+
             isLimitReached() {
                 if (this._dailyCount() >= 198) return true;
                 const lm = document.querySelector('[data-qa-popup-error-code="negotiations-limit-exceeded"]');
@@ -726,14 +1332,49 @@
                 return titleEl ? titleEl.textContent.trim() : null;
             }
 
+            // [NEW] Нормализация названия организации: регистр, кавычки и
+            // организационно-правовая форма («ООО Ромашка» и «Ромашка» — одна компания).
+            _normOrg(s) {
+                return String(s || '')
+                    .toLowerCase()
+                    .replace(/[\u00AB\u00BB\u201C\u201D"'`]/g, ' ')
+                    .replace(/(^|\s)(ооо|оао|зао|ао|пао|ип|нко|ltd|llc|inc|gmbh)(\s|$)/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            }
+
+            _rebuildAutoFilterIndex() {
+                this._autoFilterSet = new Set(
+                    this.autoFilteredOrganizations.map(x => this._normOrg(x)).filter(Boolean)
+                );
+                this._autoFilterDirty = false;
+            }
+
             isFilteredOrganization(b) {
                 if (!this.settings.filterOrganizations) return false;
                 const o = this.getOrganizationNameFromCard(b);
                 if (!o) return false;
                 const ol = o.toLowerCase();
-                for (const f of this.filteredOrganizations) { if (f && f.trim() && (ol.includes(f.toLowerCase()) || f.toLowerCase().includes(ol))) return true; }
+                // Ручной список — вхождение подстроки в обе стороны, но записи короче
+                // 3 символов игнорируются: фильтр «ит» иначе блокировал бы «Ситилинк»,
+                // «Мвидео» и половину выдачи.
+                for (const f of this.filteredOrganizations) {
+                    const fl = String(f || '').trim().toLowerCase();
+                    if (fl.length < 3) continue;
+                    if (ol.includes(fl) || fl.includes(ol)) return true;
+                }
+                // [FIX лавина ложных срабатываний] Автофильтр наполняется машинально —
+                // туда попадает КАЖДАЯ компания, которой отклик уже отправлен. Сравнение
+                // по подстроке в обе стороны означало, что короткое название вроде «Дом»
+                // из списка блокировало «Домклик», «Домофон.ру» и «Ремонт домов», а после
+                // сотни откликов выдача вычищалась почти полностью. Теперь только точное
+                // совпадение нормализованного названия — и через Set, а не перебором
+                // тысячи строк на каждую из 50 карточек каждые 5 секунд.
                 if (this.settings.autoRememberOrganizations) {
-                    for (const f of this.autoFilteredOrganizations) { if (f && f.trim() && (ol.includes(f.toLowerCase()) || f.toLowerCase().includes(ol))) return true; }
+                    const on = this._normOrg(o);
+                    if (!on) return false;
+                    if (!this._autoFilterSet || this._autoFilterDirty) this._rebuildAutoFilterIndex();
+                    return this._autoFilterSet.has(on);
                 }
                 return false;
             }
@@ -741,10 +1382,16 @@
             addToAutoFilter(o) {
                 if (!o || !this.settings.autoRememberOrganizations) return false;
                 const ot = o.trim();
-                if (!ot || this.autoFilteredOrganizations.some(x => x.toLowerCase() === ot.toLowerCase())) return false;
+                if (!ot) return false;
+                const on = this._normOrg(ot);
+                if (!on) return false;
+                if (!this._autoFilterSet || this._autoFilterDirty) this._rebuildAutoFilterIndex();
+                if (this._autoFilterSet.has(on)) return false;
                 this.autoFilteredOrganizations.push(ot);
+                this._autoFilterSet.add(on);
                 if (this.autoFilteredOrganizations.length > 1000) {
                     this.autoFilteredOrganizations.splice(0, this.autoFilteredOrganizations.length - 1000);
+                    this._autoFilterDirty = true;   // срез выкинул записи — индекс пересобрать
                 }
                 this.saveSettings();
                 return true;
@@ -758,6 +1405,7 @@
             clearAutoFilter() {
                 if (this.autoFilteredOrganizations.length && confirm('Очистить автофильтр?')) {
                     this.autoFilteredOrganizations = [];
+                    this._autoFilterDirty = true;
                     this.saveSettings();
                     this.updateStatus('Автофильтр очищен');
                 }
@@ -770,6 +1418,275 @@
                     s.date + ' | ✅' + s.success + ' ❌' + s.failed + ' ⏭️' + s.skipped + ' стр.' + (s.pages || 1)
                 ).join('\n');
                 this.updateStatus('ЛОГ СЕССИЙ:\n' + lines);
+            }
+
+            // [NEW] Быстрый и точный источник правды о тестовых заданиях.
+            // hh.ru кладёт в страницу выдачи <template id="HH-Lux-InitialState"> со
+            // списком вакансий, и у каждой есть два поля, которых НЕТ в разметке карточки:
+            //   userTestPresent          — работодатель требует тестовое задание
+            //   @responseLetterRequired  — сопроводительное письмо обязательно
+            // Замер на живой выдаче python/Москва: 9 вакансий из 50 с тестом, и ни у
+            // одной из них в карточке нет ни слова про тест — по DOM это не отследить.
+            // Раньше признак теста выяснялся загрузкой страницы отклика в скрытый iframe
+            // на КАЖДУЮ вакансию: 2-12 секунд против 0.7 секунды на всю страницу разом.
+            async _loadVacancyMeta() {
+                const key = location.href;
+                if (this._vacancyMetaKey === key && this._vacancyMeta) return this._vacancyMeta;
+
+                const domIds = Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]'))
+                    .map(b => this.getVacancyId(b)).filter(Boolean);
+
+                const parse = (docLike) => {
+                    const st = docLike.getElementById('HH-Lux-InitialState');
+                    if (!st) return null;
+                    try {
+                        const raw = st.content ? st.content.textContent : st.textContent;
+                        const j = JSON.parse(raw);
+                        const vs = j && j.vacancySearchResult && j.vacancySearchResult.vacancies;
+                        if (!Array.isArray(vs) || !vs.length) return null;
+                        const m = new Map();
+                        for (const v of vs) {
+                            const comp = v.compensation || {};
+                            const wf = (v.workFormats && v.workFormats[0] && v.workFormats[0].workFormatsElement) || [];
+                            m.set(String(v.vacancyId), {
+                                test: !!v.userTestPresent,
+                                letterRequired: !!v['@responseLetterRequired'],
+                                // responsesCount — отклики на ЭТУ вакансию. Разброс на живой
+                                // выдаче: от 0 до 7076 при медиане 366. Главный сигнал
+                                // конкуренции, и до сих пор он просто пропадал.
+                                responses: typeof v.responsesCount === 'number' ? v.responsesCount : null,
+                                experience: v.workExperience || null,
+                                formats: Array.isArray(wf) ? wf : [],
+                                salaryFrom: typeof comp.from === 'number' ? comp.from : null,
+                                salaryTo: typeof comp.to === 'number' ? comp.to : null,
+                                internship: !!v.internship,
+                                closed: !!v.closedForApplicants,
+                                published: (v.publicationTime && v.publicationTime.$) ? Date.parse(v.publicationTime.$) : null,
+                                created: v.creationTime ? Date.parse(v.creationTime) : null,
+                                managerOnline: !!(v.employerManager && v.employerManager.latestActivity === 'online'),
+                                viewers: typeof v.online_users_count === 'number' ? v.online_users_count : null
+                            });
+                        }
+                        return m;
+                    } catch(e) { return null; }
+                };
+
+                // Порог 90%, а не 100%: в выдачу иногда попадают карточки, которых
+                // в vacancySearchResult нет (реклама, спецразмещение), и требование
+                // полного покрытия гоняло бы лишний запрос на каждой странице.
+                const covers = (m) => {
+                    if (!m || !domIds.length) return false;
+                    const hit = domIds.filter(id => m.has(String(id))).length;
+                    return hit >= Math.ceil(domIds.length * 0.9);
+                };
+
+                // 1. Инлайновый шаблон — бесплатно и верно сразу после полной загрузки.
+                let map = parse(document);
+
+                // 2. После SPA-пагинации шаблон остаётся от ПЕРВОЙ страницы: проверено —
+                //    DOM показывает вторую страницу, а template всё ещё первую, и ни один
+                //    id не совпадает. Ловим это по покрытию и дозапрашиваем тот же URL
+                //    обычным GET — ровно так же делает сам пейджер hh.ru.
+                if (!covers(map)) {
+                    try {
+                        const html = await (await fetch(location.href, { credentials: 'include' })).text();
+                        const fresh = parse(new DOMParser().parseFromString(html, 'text/html'));
+                        if (covers(fresh) || (fresh && !map)) map = fresh;
+                    } catch(e) {}
+                }
+
+                this._vacancyMeta = map || null;
+                this._vacancyMetaKey = key;
+                this._skillCache = new Map();   // другая страница — другие карточки
+                return this._vacancyMeta;
+            }
+
+            // [NEW] Единая проверка вакансии по данным из стейта. Возвращает
+            // причину отказа строкой или null, если вакансия проходит.
+            // Одна функция на два места: сбор кнопок и обработку вакансии, —
+            // иначе счётчик «Найдено» обещал бы больше, чем бот отправит.
+            _metaReject(meta) {
+                if (!meta) return null;   // нет данных — не отбрасываем, решит iframe
+                const s = this.settings;
+                if (s.skipClosed && meta.closed) return 'вакансия закрыта';
+                if (meta.test) return 'тестовое задание';
+                if (s.skipInternship && meta.internship) return 'стажировка';
+                if (s.maxCompetitors > 0 && typeof meta.responses === 'number' && meta.responses > s.maxCompetitors) {
+                    return 'откликов ' + meta.responses + ' (> ' + s.maxCompetitors + ')';
+                }
+                const hasSalary = meta.salaryFrom !== null || meta.salaryTo !== null;
+                if (s.salaryRequired && !hasSalary) return 'зарплата не указана';
+                if (s.minSalary > 0 && hasSalary) {
+                    // Сравниваем по верху вилки: «до 150 000» проходит порог 100 000.
+                    // Вакансии без вилки этот фильтр не трогает — для них есть
+                    // отдельная галочка «только с указанной зарплатой».
+                    const top = meta.salaryTo || meta.salaryFrom || 0;
+                    if (top < s.minSalary) return 'зарплата ниже ' + s.minSalary;
+                }
+                if (s.workFormat !== 'any') {
+                    const f = meta.formats || [];
+                    if (s.workFormat === 'remote' && !f.includes('REMOTE')) return 'не удалёнка';
+                    if (s.workFormat === 'remote_hybrid' && !f.includes('REMOTE') && !f.includes('HYBRID')) return 'не удалёнка/гибрид';
+                    if (s.workFormat === 'on_site' && !f.includes('ON_SITE')) return 'не офис';
+                }
+                if (s.maxExperience !== 'any') {
+                    const order = { noExperience: 0, between1And3: 1, between3And6: 2, moreThan6: 3 };
+                    const lim = order[s.maxExperience], cur = order[meta.experience];
+                    if (lim !== undefined && cur !== undefined && cur > lim) return 'требуют больше опыта';
+                }
+                if (s.maxAgeDays > 0 && meta.published) {
+                    const days = (Date.now() - meta.published) / 86400000;
+                    if (days > s.maxAgeDays) return 'старше ' + s.maxAgeDays + ' дн.';
+                }
+                if (s.onlyManagerOnline && !meta.managerOnline) return 'рекрутёр офлайн';
+                if (s.maxRepostDays > 0 && meta.published && meta.created) {
+                    // Сколько вакансия крутится на самом деле: от создания до
+                    // последней перепубликации. «Опубликовано сегодня» этого не видно.
+                    const gap = Math.round((meta.published - meta.created) / 86400000);
+                    if (gap > s.maxRepostDays) return 'висит ' + gap + ' дн. (перевыкладывают)';
+                }
+                return null;
+            }
+
+            // ═══ СОВПАДЕНИЕ ПО НАВЫКАМ ═══
+            // Текст карточки: название + оба сниппета hh.ru. У анонимного посетителя
+            // сниппетов нет — тогда работаем по одному названию, не падая.
+            _cardText(b) {
+                const card = this._getCard(b);
+                if (!card) return '';
+                const parts = [
+                    card.querySelector('[data-qa="serp-item__title-text"]'),
+                    card.querySelector('[data-qa="vacancy-serp__vacancy_snippet_responsibility"]'),
+                    card.querySelector('[data-qa="vacancy-serp__vacancy_snippet_requirement"]')
+                ];
+                let out = '';
+                for (const p of parts) if (p) out += ' ' + (p.textContent || '');
+                return out.toLowerCase();
+            }
+
+            // Какие из МОИХ навыков вакансия действительно упоминает.
+            // Возвращаем оригинальные написания — они идут в письмо как есть.
+            _matchedSkills(b) {
+                if (!this.mySkills.length) return [];
+                const vid = this.getVacancyId(b);
+                if (!this._skillCache) this._skillCache = new Map();
+                if (vid && this._skillCache.has(vid)) return this._skillCache.get(vid);
+                const hay = this._cardText(b);
+                const out = [];
+                if (hay) {
+                    for (const raw of this.mySkills) {
+                        const sk = String(raw || '').trim();
+                        if (sk.length < 2) continue;
+                        if (hay.includes(sk.toLowerCase())) out.push(sk);
+                    }
+                }
+                if (vid) this._skillCache.set(vid, out);
+                return out;
+            }
+
+            // [NEW] Точные навыки со страницы вакансии: сначала теги keySkills,
+            // затем полное описание. Кэш на страницу — одна вакансия один запрос.
+            async _deepSkills(vacancyId) {
+                if (!vacancyId || !this.mySkills.length) return null;
+                const key = String(vacancyId);
+                if (!this._deepCache) this._deepCache = new Map();
+                if (this._deepCache.has(key)) return this._deepCache.get(key);
+                let res = null;
+                try {
+                    // [FIX зависание] У запроса не было таймаута. Замер на живом прогоне:
+                    // бот встал с открытой модалкой и замороженным статусом, потому что
+                    // этот fetch не отвечал, а Promise.race в processResponse его не
+                    // покрывает — он стоит РАНЬШЕ. Обрываем через 6 секунд.
+                    const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                    const killer = ctl ? setTimeout(() => { try { ctl.abort(); } catch(e) {} }, 6000) : null;
+                    let html;
+                    try {
+                        html = await (await fetch('https://hh.ru/vacancy/' + key,
+                            ctl ? { credentials: 'include', signal: ctl.signal } : { credentials: 'include' })).text();
+                    } finally { if (killer) clearTimeout(killer); }
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const st = doc.getElementById('HH-Lux-InitialState');
+                    if (st) {
+                        const raw = st.content ? st.content.textContent : st.textContent;
+                        const j = JSON.parse(raw) || {};
+                        const v = j.vacancyView || {};
+                        const tags = (v.keySkills && v.keySkills.keySkill) || [];
+                        const desc = String(v.description || '').replace(/<[^>]*>/g, ' ');
+                        const hay = (tags.join(' ') + ' ' + desc).toLowerCase();
+                        const matched = [];
+                        for (const item of this.mySkills) {
+                            const sk = String(item || '').trim();
+                            if (sk.length < 2) continue;
+                            if (hay.indexOf(sk.toLowerCase()) >= 0) matched.push(sk);
+                        }
+                        res = { matched: matched, tags: tags };
+                    }
+                } catch(e) {}
+                if (this._deepCache.size > 300) this._deepCache.clear();
+                this._deepCache.set(key, res);
+                return res;
+            }
+
+            // [NEW] Рейтинг работодателя из карточки. Возвращает null, если его нет.
+            _employerRating(b) {
+                const card = this._getCard(b);
+                if (!card) return null;
+                const rv = card.querySelector('[data-qa="company-review-rating-value"]');
+                if (!rv) return null;
+                const rating = parseFloat(String(rv.textContent || '').replace(',', '.'));
+                if (!Number.isFinite(rating)) return null;
+                const rc = card.querySelector('[data-qa="company-review-rating-reviews-count"]');
+                const reviews = parseInt(String(rc ? rc.textContent : '').replace(/[^0-9]/g, ''), 10);
+                return { rating: rating, reviews: Number.isFinite(reviews) ? reviews : 0 };
+            }
+
+            // [NEW] Отсев работодателей, которые не читают отклики.
+            // Работает только по накопленным данным: пока процент неизвестен,
+            // вакансия не отбрасывается — иначе бот не смог бы его узнать.
+            isReviewRateOk(b) {
+                const min = this.settings.minReviewRate;
+                if (!min) return true;
+                const empId = this.getEmployerIdFromCard(b);
+                if (!empId) return true;
+                const rec = this.employerRates[String(empId)];
+                if (!rec || typeof rec.rate !== 'number') return true;
+                return rec.rate >= min;
+            }
+
+            isRatingOk(b) {
+                const min = this.settings.minEmployerRating;
+                if (!min) return true;
+                const r = this._employerRating(b);
+                // Рейтинга нет — не отбрасываем: у части работодателей отзывов просто
+                // не набралось, и это не повод пропускать вакансию.
+                if (!r) return true;
+                if (r.reviews < this.settings.minReviewsForRating) return true;
+                return r.rating >= min;
+            }
+
+            isSkillMatch(b) {
+                const need = this.settings.minSkillMatch;
+                if (!need || !this.mySkills.length) return true;
+                return this._matchedSkills(b).length >= need;
+            }
+
+            // [NEW] Белый список слов в названии. Пустой список — фильтр выключен.
+            isRequiredTitle(b) {
+                if (!this.titleRequiredWords.length) return true;
+                const t = (this.getVacancyTitleFromCard(b) || '').toLowerCase();
+                if (!t) return false;
+                for (const w of this.titleRequiredWords) {
+                    const wl = String(w || '').trim().toLowerCase();
+                    if (!wl) continue;
+                    const stem = wl.length >= 4 ? wl.replace(/[аеёиоуыэюяй]$/, '') : wl;
+                    if (t.includes(stem)) return true;
+                }
+                return false;
+            }
+
+            _metaFor(vacancyId) {
+                if (!vacancyId || !this._vacancyMeta) return null;
+                return this._vacancyMeta.get(String(vacancyId)) || null;
             }
 
             async checkTestViaIframe(vacancyId, employerId, organizationName) {
@@ -835,10 +1752,17 @@
                             // двойной вызов если interval сработает в промежутке 500мс
                             const directLink = d.querySelector('[data-qa="vacancy-response-link-advertising"]');
                             if (directLink && this._isVisible(directLink)) {
-                                this.stats.success++;
+                                // [FIX ложный успех] Прямой отклик уводит на сайт работодателя —
+                                // через hh.ru он не отправляется вообще. Раньше здесь стоял
+                                // stats.success++ и click() по ссылке внутри скрытого 1x1 iframe:
+                                // никакого отклика не уходило, а счётчик успехов рос, при этом
+                                // _bumpDaily() не вызывался — «успехи» и суточный счётчик расходились.
+                                // Считаем это пропуском и запоминаем вакансию, чтобы не открывать её снова.
+                                this.addSkippedVacancy('id_' + vacancyId);
+                                if (organizationName && this.settings.autoRememberOrganizations) this.addToAutoFilter(organizationName);
+                                this.stats.skipped++;
                                 this.updateStatsDisplay();
                                 finish({ isTest: false, directResponse: true });
-                                try { directLink.click(); } catch(e) {}
                                 return;
                             }
 
@@ -991,13 +1915,52 @@
                 return r;
             }
 
+            // Оценка совпадения названия вакансии и резюме — вынесена, чтобы
+            // считать её и без открытого дропдауна.
+            _scoreResume(vt, title) {
+                const vl = String(vt || '').toLowerCase(), tl = String(title || '').toLowerCase();
+                if (!vl || !tl) return 0;
+                if (tl === vl) return 100;
+                if (vl.includes(tl)) return 95;
+                if (tl.includes(vl)) return 90;
+                const vw = vl.split(/[\s,()\-\/]+/).filter(w => w.length > 1);
+                const rw = tl.split(/[\s,()\-\/]+/).filter(w => w.length > 1);
+                if (!vw.length || !rw.length) return 0;
+                let m = 0;
+                for (const v of vw) { for (const r of rw) { if (r.includes(v) || v.includes(r)) { m++; break; } } }
+                return (m / vw.length) * 100;
+            }
+
             async selectBestResume(vt) {
                 if (!this.settings.autoSelectResume || !vt) return false;
+                // [FIX холостой дропдаун] Выход по `rs.length <= 1` стоял ПОСЛЕ
+                // открытия списка, поэтому при единственном резюме бот открывал и
+                // закрывал его на каждой вакансии — около 2 секунд впустую, почти
+                // 7 минут на 200 откликов. Количество резюме за сессию не меняется.
+                if (this._resumeCount !== undefined && this._resumeCount <= 1) return false;
+                // [FIX 8 секунд на вакансию] Список резюме за сессию не меняется.
+                // Запомнив названия при первом открытии, дальше считаем совпадение
+                // БЕЗ открытия дропдауна и лезем в него только когда резюме реально
+                // надо переключить. На выдаче, где ни одно не проходит порог, это
+                // экономит около 8 секунд на каждую вакансию.
+                if (this._resumeTitles && this._resumeTitles.length > 1) {
+                    const cur = (document.querySelector('[data-qa="resume-title"]') || {}).textContent;
+                    const curT = String(cur || '').trim();
+                    let bestT = null, bestS = 0;
+                    for (const t of this._resumeTitles) {
+                        if (t === curT) continue;
+                        const sc = this._scoreResume(vt, t);
+                        if (sc > bestS) { bestS = sc; bestT = t; }
+                    }
+                    if (!bestT || bestS < this.settings.resumeTitleMatching) return false;
+                }
                 const op = await this.openResumeDropdown();
                 if (!op) return false;
                 await this.wait(500);
                 try {
                     const rs = await this.getAllResumes();
+                    this._resumeCount = rs.length;
+                    this._resumeTitles = rs.map(r => r.title);
                     if (rs.length <= 1) { return false; }
                     let best = null, bs = 0;
                     const vl = vt.toLowerCase();
@@ -1026,22 +1989,78 @@
                 }
             }
 
+            // [NEW] hh.ru может запретить отклик до смены настроек резюме.
+            // Замер на живой модалке: «Чтобы откликнуться на эту вакансию, поменяйте
+            // видимость резюме на "Видно компаниям-клиентам HeadHunter"», кнопка
+            // «Откликнуться» при этом disabled. Раньше бот молча ждал таймаут и
+            // оставлял модалку открытой — теперь распознаём и идём дальше.
+            _resumeVisibilityBlocked() {
+                try {
+                    return !!document.querySelector('[data-qa="hidden-resume-warning"]');
+                } catch(e) { return false; }
+            }
+
             async submitResponse() {
                 let sb = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])') || document.querySelector('[data-qa="vacancy-response-submit-popup"]');
                 if (!sb) return false;
                 if (sb.hasAttribute('disabled')) {
                     await this.wait(1000);
                     sb = document.querySelector('[data-qa="vacancy-response-submit-popup"]:not([disabled])') || document.querySelector('[data-qa="vacancy-response-submit-popup"]');
-                    if (!sb || sb.hasAttribute('disabled')) return false;
+                    if (!sb || sb.hasAttribute('disabled')) {
+                        // [FIX] Предупреждение о видимости резюме бывает и просто
+                        // информационным: замер на живой модалке — у «SEO-специалист
+                        // (стажер)» оно есть, а кнопка активна и отклик проходит.
+                        // Поэтому запретом считаем только случай, когда кнопка так и
+                        // НЕ разблокировалась, а предупреждение при этом висит.
+                        // Ранняя проверка по одному наличию предупреждения пропускала
+                        // вакансии, на которые отклик ушёл бы нормально.
+                        if (this._resumeVisibilityBlocked()) return 'RESUME_HIDDEN';
+                        return false;
+                    }
                 }
                 sb.click();
-                await this.wait(2000);
-                return !this.isLimitReached();
+                await this.wait(1500);
+                if (this.isLimitReached()) return false;
+                // [FIX ложный успех] Раньше метод возвращал true, не глядя на результат.
+                // Отказ hh.ru (обязательное письмо, вакансия уже закрыта, не заполнены
+                // обязательные поля) уходил в «успешно», накручивал суточный счётчик
+                // и съедал лимит 200, которого на самом деле не тратилось.
+                for (let i = 0; i < 6; i++) {
+                    // [NEW] У hh.ru есть ЯВНЫЙ маркер успеха — он надёжнее вывода
+                    // «форма исчезла, значит приняли»: форма может закрыться и по
+                    // другой причине. Селекторы сняты из бандлов сайта.
+                    if (document.querySelector('[data-qa="response-sent-complete"],[data-qa="response-sent-complete-feed"]')) return true;
+                    const form = document.querySelector('[data-qa="vacancy-response-submit-popup"]');
+                    if (!form || !this._isVisible(form)) return true;   // форма закрылась — отклик принят
+                    await this.wait(500);
+                }
+                // Форма ещё висит, но и ошибки нет — не считаем это провалом,
+                // иначе на медленной сети копились бы ложные «ошибки подряд».
+                return true;
             }
 
-            async _processResponseInternal(o, depth, vacancyTitle) {
+            // Ошибку ищем только внутри модалки: на выдаче под общий селектор
+            // попадает служебная разметка hh.ru, и любой отклик считался бы неудачным.
+            // [NEW] hh.ru предупреждает, если работодатель уже отказывал.
+            // Смысла слать повторный отклик нет — помечаем вакансию пропущенной.
+            _hasRejectWarning() {
+                try { return !!document.querySelector('[data-qa="response-reject-warning"],[data-qa="response-reject-warning_status"]'); }
+                catch(e) { return false; }
+            }
+
+            _hasFormError() {
+                const modal = document.querySelector('[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]');
+                const scope = modal || document;
+                for (const el of scope.querySelectorAll('[data-qa-popup-error-code],[role="alert"]')) {
+                    if (this._isVisible(el) && (el.textContent || '').trim()) return true;
+                }
+                return false;
+            }
+
+            async _processResponseInternal(o, depth, vacancyTitle, forceLetter) {
                 if (depth > 5) return false;
                 if (await this.checkAndCloseDirectResponseModal(o)) return 'DIRECT_RESPONSE';
+                if (this._hasRejectWarning()) return 'ALREADY_REJECTED';
                 for (let i = 0; i < 3; i++) { await this.closeChatIfOpened(); await this.wait(300); }
                 await this.wait(500);
                 if (this.settings.autoSelectResume && !this.resumeSelectedFlag) {
@@ -1050,9 +2069,10 @@
                 }
                 const ta = document.querySelector('[data-qa="vacancy-response-popup-form-letter-input"]');
                 if (ta) {
-                    if (!this.settings.skipCoverLetter) {
+                    if (!this.settings.skipCoverLetter || forceLetter) {
                         // [NEW] Подставляем название вакансии и компанию в шаблон
-                        const letter = this._renderCoverLetter(vacancyTitle || this.getVacancyTitleFromModal(), o);
+                        const chosen = this._currentLetter || { text: this.coverLetter, variant: 'A' };
+                        const letter = this._renderCoverLetter(vacancyTitle || this.getVacancyTitleFromModal(), o, chosen.text);
                         const ns = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
                         if (ns) { ns.call(ta, letter); ta.dispatchEvent(new Event('input', { bubbles: true })); }
                         else { ta.value = letter; ta.dispatchEvent(new Event('input', { bubbles: true })); }
@@ -1066,18 +2086,29 @@
                 // Бот знал только первый вариант, поэтому на странице письмо не
                 // раскрывалось и отклик уходил вообще без сопроводительного.
                 const al = document.querySelector('[data-qa="add-cover-letter"], [data-qa="vacancy-response-letter-toggle"]');
-                if (al && !this.settings.skipCoverLetter) { al.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
-                const rl = document.querySelector('[data-qa="relocation-warning-confirm"]') || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться'));
-                if (rl) { rl.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle); }
+                if (al && (!this.settings.skipCoverLetter || forceLetter)) { al.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle, forceLetter); }
+                // [NEW] response-anyway — родной селектор кнопки «Откликнуться всё
+                // равно» из бандлов hh.ru. Раньше она искалась перебором ВСЕХ кнопок
+                // страницы по тексту — и медленно, и ломалось от смены формулировки.
+                const rl = document.querySelector('[data-qa="response-anyway"]')
+                        || document.querySelector('[data-qa="relocation-warning-confirm"]')
+                        || Array.from(document.querySelectorAll('button')).find(b => b.textContent?.includes('Все равно откликнуться'));
+                if (rl) { rl.click(); await this.wait(800); return await this._processResponseInternal(o, depth + 1, vacancyTitle, forceLetter); }
                 return await this.submitResponse();
             }
 
-            async processResponse(o, depth = 0, vacancyTitle = null) {
-                const TIMEOUT_MS = 15000;
+            async processResponse(o, depth = 0, vacancyTitle = null, forceLetter = false) {
+                // [FIX ложные ошибки] Было 15 секунд — короче, чем реальный путь.
+                // Замер на живом прогоне: дропдаун резюме съедает ~8 с, раскрытие
+                // письма ~1 с, ожидание после клика 1.5 с. Клик по «Откликнуться»
+                // приходился на 26-ю секунду, а таймаут срабатывал на 27-й: hh.ru
+                // отклик ПРИНИМАЛ, а бот писал ошибку, не увеличивал суточный
+                // счётчик и не помечал вакансию — то есть мог откликнуться повторно.
+                const TIMEOUT_MS = 45000;
                 let timeoutId;
                 const timeoutPromise = new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), TIMEOUT_MS); });
                 try {
-                    const result = await Promise.race([this._processResponseInternal(o, depth, vacancyTitle), timeoutPromise]);
+                    const result = await Promise.race([this._processResponseInternal(o, depth, vacancyTitle, forceLetter), timeoutPromise]);
                     clearTimeout(timeoutId);
                     return result;
                 } catch(e) {
@@ -1135,18 +2166,54 @@
 
             getAvailableButtons() {
                 if (window.location.href.includes('/applicant/vacancy_response')) return [];
-                return Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
+                const list = Array.from(document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]')).filter(b => {
                     if (!this._isVisible(b) || b.style.display === 'none') return false;
                     if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return false;
                     if (this.isFilteredOrganization(b)) return false;
                     if (this.isFilteredTitle(b)) return false;
+                    if (!this.isRequiredTitle(b)) return false;
+                    if (!this.isSkillMatch(b)) return false;
+                    if (!this.isRatingOk(b)) return false;
+                    if (!this.isReviewRateOk(b)) return false;
                     const vid = this.getVacancyId(b);
                     if (vid && this.skippedVacancies.has('id_' + vid)) return false;
                     const empId = this.getEmployerIdFromCard(b);
                     if (empId && this.testEmployerIds.has(String(empId))) return false;
+                    // Метаданные страницы уже загружены — отсеиваем тесты, закрытые,
+                    // стажировки и всё, что не проходит фильтры по зарплате, формату,
+                    // опыту, свежести и конкуренции. Иначе счётчик «Найдено» обещал бы
+                    // больше, чем бот отправит.
+                    if (this._metaReject(this._metaFor(vid))) return false;
                     if (this.settings.skipResponded && this._isRespondedCard(b)) return false;
                     return true;
                 });
+                // [NEW] Сначала наименее конкурентные. Лимит hh.ru — 200 откликов
+                // в сутки, и порядок выдачи тратит их на вакансии с сотнями
+                // соискателей: на живой выдаче 38 из 50 имели 100+ откликов при
+                // медиане 366, хотя рядом лежали три вакансии с нулём.
+                if (this.settings.sortByCompetition || this.settings.sortBySkills || this.settings.preferManagerOnline) {
+                    const rank = (b) => {
+                        const m = this._metaFor(this.getVacancyId(b));
+                        return (m && typeof m.responses === 'number') ? m.responses : Number.MAX_SAFE_INTEGER;
+                    };
+                    list.sort((a, b) => {
+                        if (this.settings.preferManagerOnline) {
+                            // Онлайн-рекрутёр вперёд: у таких вакансий откликов втрое меньше.
+                            const ma = this._metaFor(this.getVacancyId(a));
+                            const mb = this._metaFor(this.getVacancyId(b));
+                            const d0 = (mb && mb.managerOnline ? 1 : 0) - (ma && ma.managerOnline ? 1 : 0);
+                            if (d0) return d0;
+                        }
+                        if (this.settings.sortBySkills && this.mySkills.length) {
+                            // Больше совпавших навыков — раньше. При равенстве решает конкуренция.
+                            const d = this._matchedSkills(b).length - this._matchedSkills(a).length;
+                            if (d) return d;
+                        }
+                        if (this.settings.sortByCompetition) return rank(a) - rank(b);
+                        return 0;
+                    });
+                }
+                return list;
             }
 
             async processSingleVacancy(b, i, t) {
@@ -1168,18 +2235,50 @@
                 if (b.tagName === 'A' && (b.target === '_blank' || (b.href && !b.href.includes('/applicant/vacancy_response')))) return null;
                 if (bot.isFilteredOrganization(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (bot.isFilteredTitle(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (!bot.isRequiredTitle(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (!bot.isSkillMatch(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (!bot.isRatingOk(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
+                if (!bot.isReviewRateOk(b)) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (vacancyId && bot.skippedVacancies.has('id_' + vacancyId)) return null;
                 if (employerId && bot.testEmployerIds.has(String(employerId))) { bot.stats.skipped++; bot.updateStatsDisplay(); return null; }
                 if (bot.settings.skipResponded && bot._isRespondedCard(b)) return null;
 
-                // Случайный пропуск 5% вакансий — имитирует поведение реального пользователя
-                if (Math.random() < 0.05) {
+                // Случайный пропуск части вакансий — имитирует поведение реального
+                // пользователя. Доля настраивается; 0% отключает пропуск полностью.
+                if (Math.random() * 100 < bot.settings.randomSkipPercent) {
                     bot.stats.skipped++;
                     bot.updateStatsDisplay();
                     return null;
                 }
 
-                if (vacancyId) {
+                // Тест виден прямо из стейта страницы — открывать вакансию незачем.
+                const meta = bot._metaFor(vacancyId);
+                if (meta && meta.test) {
+                    // Вакансия с тестовым — бот её не берёт, но она может быть хорошей.
+                    if (bot.settings.favoriteSkippedTests) bot._addToFavorites(b);
+                    bot.addSkippedVacancy('id_' + vacancyId);
+                    if (employerId) {
+                        bot.testEmployerIds.add(String(employerId));
+                        Store.set({ 'hh-test-employers': [...bot.testEmployerIds] });
+                    }
+                    if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
+                    bot.stats.skipped++;
+                    bot.updateStatsDisplay();
+                    return null;
+                }
+                // Остальные фильтры по данным вакансии — зарплата, формат, опыт,
+                // свежесть, конкуренция, стажировка, закрытая вакансия.
+                const rejectReason = bot._metaReject(meta);
+                if (rejectReason) {
+                    if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                    bot.stats.skipped++;
+                    bot.updateStatsDisplay();
+                    return null;
+                }
+                // Стейт эту вакансию не покрыл — падаем в медленную проверку через iframe.
+                // Когда meta есть и теста нет, iframe не нужен вовсе: «прямой отклик»
+                // всё равно перехватывается ниже через checkAndCloseDirectResponseModal().
+                if (vacancyId && !meta) {
                     const checkResult = await bot.checkTestViaIframe(vacancyId, employerId, o);
                     // isTest/directResponse — не ошибки, возвращаем null
                     if (checkResult.isTest) return null;
@@ -1232,8 +2331,40 @@
 
                 await bot.wait(300 + Math.random() * 300);
                 bot.resumeSelectedFlag = false;
-                const ok = await bot.processResponse(o, 0, vacancyTitle);
+                // [NEW] Выбираем вариант письма до отправки — он попадёт в журнал
+                // и потом свяжется со статусом отклика в отчёте по конверсии.
+                bot._currentLetter = bot._pickLetter();
+                // Навыки, которые вакансия реально просит И которые есть у вас.
+                // Подставляются в {навыки} — письмо называет ровно то, что нужно
+                // этому работодателю, и ничего сверх вашего же списка.
+                bot._currentSkills = bot._matchedSkills(b);
+                // Уточняем по странице вакансии: keySkills точнее сниппета,
+                // а письмо получает ровно те навыки, что работодатель перечислил.
+                if (bot.settings.deepMatch && bot.mySkills.length) {
+                    const deep = await bot._deepSkills(vacancyId);
+                    if (deep && deep.matched.length) bot._currentSkills = deep.matched;
+                }
+                // hh.ru отклоняет отклик без письма, если работодатель отметил его
+                // обязательным (@responseLetterRequired). Раньше при выключенном
+                // сопроводительном такие вакансии молча уходили в «ошибка».
+                const ok = await bot.processResponse(o, 0, vacancyTitle, !!(meta && meta.letterRequired));
 
+                if (ok === 'ALREADY_REJECTED') {
+                    bot.stats.skipped++;
+                    if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                    if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
+                    bot.updateStatsDisplay();
+                    await bot.closeModal();
+                    return null;
+                }
+                if (ok === 'RESUME_HIDDEN') {
+                    bot.stats.skipped++;
+                    if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
+                    bot.updateStatsDisplay();
+                    bot.updateStatus('\u26A0\uFE0F Резюме скрыто от этого работодателя.\nhh.ru \u2192 Резюме \u2192 Видимость: «Видно компаниям-клиентам HeadHunter»');
+                    await bot.closeModal();
+                    return null;
+                }
                 if (ok === 'DIRECT_RESPONSE') {
                     bot.stats.skipped++;
                     if (vacancyId) bot.addSkippedVacancy('id_' + vacancyId);
@@ -1246,6 +2377,7 @@
                     bot.consecutiveErrors = 0;
                     bot.stats.success++;
                     bot._bumpDaily();
+                    bot._logResponse(vacancyId, employerId, o, vacancyTitle, meta);
                     // [FIX] Добавляем в автофильтр после успешного отклика —
                     // раньше addToAutoFilter вызывался только для прямых откликов и тестов
                     if (o && bot.settings.autoRememberOrganizations) bot.addToAutoFilter(o);
@@ -1296,11 +2428,165 @@
                 } catch(e) {}
             }
 
+            // ═══ ОЧЕРЕДЬ ПОИСКОВЫХ ЗАПРОСОВ ═══
+            // Один запрос с включёнными фильтрами выдыхается быстро: в замере
+            // «не более 50 откликов» оставило 5 вакансий из 50. До суточных 200
+            // на одном поиске не добраться, поэтому бот идёт по списку URL.
+            // ═══ ОПТИМИЗАТОР ПОИСКОВОГО URL ═══
+            // Переносит фильтры на сторону hh.ru. Параметры сняты из searchClusters
+            // самой выдачи и проверены запросами: order_by=publication_time,
+            // label=not_from_agency | accredited_it | low_performance | with_salary,
+            // work_format, experience (перечислением), salary + only_with_salary,
+            // search_period. Клиентские фильтры остаются для того, чего у hh.ru нет:
+            // навыки, точный порог конкуренции, тесты, чёрный список работодателей.
+            _optimizeUrl(rawUrl) {
+                let u;
+                try { u = new URL(rawUrl, location.href); } catch(e) { return rawUrl; }
+                const host = u.hostname.toLowerCase();
+                if (host !== 'hh.ru' && !host.endsWith('.hh.ru')) return rawUrl;
+                if (!/\/search\/vacancy/.test(u.pathname)) return rawUrl;
+
+                const s = this.settings;
+                const p = u.searchParams;
+                const labels = new Set(p.getAll('label'));
+
+                if (s.orderByFresh) p.set('order_by', 'publication_time');
+                if (s.searchInTitleOnly && p.get('text')) p.set('search_field', 'name');
+                if (s.labelNoAgency) labels.add('not_from_agency');
+                if (s.labelAccreditedIt) labels.add('accredited_it');
+                if (s.labelLowPerformance) labels.add('low_performance');
+
+                if (s.serverSideFilters) {
+                    if (s.salaryRequired) labels.add('with_salary');
+                    if (s.minSalary > 0) {
+                        p.set('salary', String(s.minSalary));
+                        p.set('only_with_salary', 'true');
+                    }
+                    if (s.workFormat === 'remote') { p.delete('work_format'); p.append('work_format', 'REMOTE'); }
+                    else if (s.workFormat === 'on_site') { p.delete('work_format'); p.append('work_format', 'ON_SITE'); }
+                    else if (s.workFormat === 'remote_hybrid') {
+                        p.delete('work_format');
+                        p.append('work_format', 'REMOTE');
+                        p.append('work_format', 'HYBRID');
+                    }
+                    if (s.maxAgeDays > 0) p.set('search_period', String(Math.min(30, s.maxAgeDays)));
+                    if (s.maxExperience !== 'any') {
+                        // «не выше» — перечисляем все допустимые уровни, hh.ru
+                        // складывает одноимённые параметры по ИЛИ (проверено).
+                        const order = ['noExperience', 'between1And3', 'between3And6', 'moreThan6'];
+                        const lim = order.indexOf(s.maxExperience);
+                        if (lim >= 0) {
+                            p.delete('experience');
+                            order.slice(0, lim + 1).forEach(v => p.append('experience', v));
+                        }
+                    }
+                }
+
+                if (labels.size) { p.delete('label'); [...labels].forEach(v => p.append('label', v)); }
+                p.delete('page');
+                p.delete('search_session_id');
+                u.search = p.toString();
+                return u.toString();
+            }
+
+            // Сравнение без служебных параметров — порядок ключей у hh.ru свой.
+            _normQuery(url) {
+                try {
+                    const x = new URL(url, location.href);
+                    const p = new URLSearchParams(x.search);
+                    ['page', 'search_session_id', 'hhtmFrom', 'hhtmFromLabel', 'customDomain'].forEach(k => p.delete(k));
+                    return x.pathname + '?' + JSON.stringify([...p.entries()].sort());
+                } catch(e) { return String(url); }
+            }
+
+            // Возвращает true, если увела вкладку на оптимизированный адрес.
+            async _applyUrlOptimization() {
+                const cur = location.href.split('#')[0];
+                const opt = this._optimizeUrl(cur);
+                if (this._normQuery(opt) === this._normQuery(cur)) return false;
+                // Защита от петли: если по этому же запросу уже переходили — не повторяем.
+                let guard = '';
+                try { guard = sessionStorage.getItem('hh-opt-done') || ''; } catch(e) {}
+                if (guard === this._normQuery(opt)) return false;
+                try { sessionStorage.setItem('hh-opt-done', this._normQuery(opt)); } catch(e) {}
+                try { sessionStorage.setItem('hh-auto-restart', '1'); } catch(e) {}
+                this.updateStatus('Оптимизирую поиск (свежие вперёд, фильтры на стороне hh.ru)...');
+                this.saveSettings();
+                await this.wait(1200);
+                location.href = opt;
+                return true;
+            }
+
+            optimizeSearchManually() {
+                const cur = location.href.split('#')[0];
+                const opt = this._optimizeUrl(cur);
+                if (this._normQuery(opt) === this._normQuery(cur)) {
+                    this.updateStatus('Поиск уже оптимизирован \u2705');
+                    return;
+                }
+                try { sessionStorage.removeItem('hh-auto-restart'); } catch(e) {}
+                this.updateStatus('Перехожу на оптимизированный поиск...');
+                setTimeout(() => { location.href = opt; }, 600);
+            }
+
+            _sameSearch(a, b) {
+                try {
+                    const ua = new URL(a, location.href), ub = new URL(b, location.href);
+                    if (ua.hostname !== ub.hostname || ua.pathname !== ub.pathname) return false;
+                    // page и служебные метки меняются при пагинации — их не сравниваем
+                    const strip = (u) => {
+                        const p = new URLSearchParams(u.search);
+                        ['page', 'search_session_id', 'hhtmFrom', 'hhtmFromLabel', 'customDomain'].forEach(k => p.delete(k));
+                        return JSON.stringify([...p.entries()].sort());
+                    };
+                    return strip(ua) === strip(ub);
+                } catch(e) { return false; }
+            }
+
+            async _advanceSearchQueue() {
+                const q = (this.searchQueue || [])
+                    .map(u => String(u || '').trim())
+                    .filter(u => /^https?:\/\/([a-z0-9-]+\.)*hh\.ru\//i.test(u));
+                if (!q.length) return false;
+                const cur = location.href.split('#')[0];
+                const idx = q.findIndex(u => this._sameSearch(u, cur));
+                let next = null;
+                if (idx < 0) next = q[0];                       // текущий поиск не из очереди — начинаем с первого
+                else if (idx + 1 < q.length) next = q[idx + 1];  // следующий
+                if (!next) return false;                         // очередь пройдена
+                this.updateStatus('Запрос исчерпан → перехожу к поиску ' + (idx < 0 ? 1 : idx + 2) + ' из ' + q.length);
+                this.saveSettings();
+                try { sessionStorage.setItem('hh-auto-restart', '1'); } catch(e) {}
+                await this.wait(1500);
+                try { sessionStorage.removeItem('hh-opt-done'); } catch(e) {}
+                location.href = this._optimizeUrl(next);
+                return true;
+            }
+
             async startAutoProcess() {
                 tryRestoreBot();
                 const bot = window.hhAutoResponder || this;
                 if (bot.isRunning) return;
                 if (window.location.href.includes('/applicant/vacancy_response')) { bot.updateStatus('Перейдите на страницу поиска'); return; }
+                // [NEW] Стоп-кран на шаблоне. Письмо по умолчанию содержит плейсхолдер
+                // «[Ваше Имя]», и запуск «как есть» отправлял его сотне работодателей
+                // за один прогон — откатить такое нельзя. Проверяем до первого клика.
+                if (!bot.settings.skipCoverLetter) {
+                    const ph = String(bot.coverLetter || '').match(/\[[^\]]{0,40}\]/)
+                            || String(bot.coverLetterB || '').match(/\[[^\]]{0,40}\]/);
+                    if (ph) {
+                        bot.updateStatus('\u26A0\uFE0F В письме остался шаблон ' + ph[0] +
+                            '\nОтредактируйте письмо или снимите галочку «Отправлять сопроводительное».');
+                        return;
+                    }
+                    if (!String(bot.coverLetter || '').trim()) {
+                        bot.updateStatus('\u26A0\uFE0F Письмо пустое. Заполните его или отключите отправку письма.');
+                        return;
+                    }
+                }
+                // Переносим фильтры в URL до начала прогона: страница перезагрузится
+                // уже отфильтрованной сервером, и бот продолжит по флагу автозапуска.
+                if (await bot._applyUrlOptimization()) return;
                 bot.isRunning = true;
                 bot.consecutiveErrors = 0;
                 bot._lastErrorPauseAt = 0;
@@ -1313,13 +2599,19 @@
                     while (bot.isRunning) {
                         await bot.smartDelay();
 
-                        const bt = await bot.waitForButtons(8000);
+                        await bot.waitForButtons(8000);
+                        // Один запрос на страницу — до перебора вакансий, чтобы
+                        // тестовые отсеялись ещё на этапе сбора кнопок.
+                        await bot._loadVacancyMeta().catch(() => {});
+                        const bt = bot.getAvailableButtons();
 
                         if (!bt.length) {
                             const allBtns = document.querySelectorAll('[data-qa="vacancy-serp__vacancy_response"]');
                             const visibleBtns = Array.from(allBtns).filter(b => bot._isVisible(b) && b.style.display !== 'none');
                             if (allBtns.length > 0 && visibleBtns.length > 0) {
-                                bot.updateStatus('Стр.' + bot.currentPage + ' | Все ' + visibleBtns.length + ' отфильтрованы/пропущены');
+                                const testCnt = visibleBtns.filter(b => { const m = bot._metaFor(bot.getVacancyId(b)); return m && m.test; }).length;
+                                bot.updateStatus('Стр.' + bot.currentPage + ' | Все ' + visibleBtns.length + ' отфильтрованы/пропущены'
+                                    + (testCnt ? ' (с тестовым: ' + testCnt + ')' : ''));
                             } else {
                                 bot.updateStatus('Стр.' + bot.currentPage + ' | Все обработаны');
                             }
@@ -1335,6 +2627,9 @@
                                 }
                             }
                             const summary = '✅' + bot.stats.success + ' ❌' + bot.stats.failed + ' ⏭️' + bot.stats.skipped;
+                            // Страницы кончились — пробуем следующий поиск из очереди.
+                            // Метод сам уводит вкладку и ставит флаг автозапуска.
+                            if (await bot._advanceSearchQueue()) return;
                             bot.updateStatus('Завершено! ' + summary);
                             bot._sendNotification('HH Авто-отклик завершён', summary);
                             bot.saveSettings();
@@ -1344,6 +2639,12 @@
                         for (let i = 0; i < bt.length && bot.isRunning; i++) {
                             const _result = await bot.processSingleVacancy(bt[i], i, bt.length);
 
+                            if (bot._looksBlocked()) {
+                                bot.updateStatus('🛑 hh.ru показал проверку (капча/блокировка). Бот остановлен.\nПройдите проверку вручную и запустите заново.');
+                                bot._sendNotification('HH Авто-отклик остановлен', 'hh.ru показал проверку — нужно вмешательство');
+                                bot.stopAutoProcess();
+                                return;
+                            }
                             if (bot.consecutiveErrors >= 8) {
                                 bot.updateStatus('Слишком много ошибок — перезагрузка...');
                                 bot.saveSettings();
@@ -1391,8 +2692,9 @@
                 tryRestoreBot();
                 const bot = window.hhAutoResponder || this;
                 if (bot.isRunning) return;
+                await bot._loadVacancyMeta().catch(() => {});
                 const bt = bot.getAvailableButtons();
-                if (!bt.length) return;
+                if (!bt.length) { bot.updateStatus('Нет доступных вакансий на странице'); return; }
                 bot.isRunning = true;
                 bot.updateControlButtons();
                 try {
@@ -1425,7 +2727,23 @@
 
                 addListener(this.toggleButton, 'click', () => { this.panel.style.display = this.panel.style.display === 'none' ? 'block' : 'none'; });
                 addListener($('hh-close-btn'), 'click', () => { this.panel.style.display = 'none'; });
-                addListener($('hh-settings-header'), 'click', () => this.toggleSettings());
+                // [NEW] Одна делегированная обработка всех секций: заголовки
+                // рендерятся заново при каждой перерисовке панели, а слушатель
+                // висит на самой панели и переживает перерисовку тела.
+                addListener(this.panel, 'click', (e) => {
+                    const tab = e.target && e.target.closest ? e.target.closest('.hhx-tab') : null;
+                    if (!tab || !this.panel.contains(tab)) return;
+                    const key = tab.getAttribute('data-sec');
+                    if (!key) return;
+                    this.activeTab = key;
+                    this.panel.querySelectorAll('.hhx-pane').forEach(p => {
+                        p.style.display = (p.getAttribute('data-sec-body') === key) ? '' : 'none';
+                    });
+                    this.panel.querySelectorAll('.hhx-tab').forEach(t => {
+                        t.classList.toggle('hhx-tab-on', t.getAttribute('data-sec') === key);
+                    });
+                    this.debouncedSave();
+                });
                 addListener($('hh-theme-slider'), 'click', () => { this.toggleTheme(); this.createInterface(); this.setupEventListeners(); });
                 addListener($('hh-start'), 'click', () => { tryRestoreBot(); (window.hhAutoResponder || this).startAutoProcess(); });
                 addListener($('hh-test'), 'click', () => this.testProcess());
@@ -1446,7 +2764,7 @@
                 });
                 addListener($('hh-auto-select-resume'), 'change', e => { this.settings.autoSelectResume = e.target.checked; this.debouncedSave(); this.updateStatus(e.target.checked ? 'Автовыбор ВКЛЮЧЕН' : 'Автовыбор ВЫКЛЮЧЕН'); });
                 addListener($('hh-resume-matching'), 'input', e => { this.settings.resumeTitleMatching = clampNum(e.target.value, 0, 100, 70, true); const mv = $('hh-matching-value'); if (mv) mv.textContent = this.settings.resumeTitleMatching + '%'; this.debouncedSave(); });
-                addListener($('hh-auto-remember'), 'change', e => { this.settings.autoRememberOrganizations = e.target.checked; this.debouncedSave(); this.updateStatus(e.target.checked ? 'АВТОфильтр ВКЛЮЧЕН' : 'АВТОфильтр выключен'); });
+                addListener($('hh-auto-remember'), 'change', e => { this.settings.autoRememberOrganizations = e.target.checked; this.debouncedSave(); this.updateCount(); this.updateStatus(e.target.checked ? 'АВТОфильтр ВКЛЮЧЕН' : 'АВТОфильтр выключен'); });
                 addListener($('hh-letter'), 'input', e => {
                     // [FIX] Счётчик обещает лимит 2000, но обрезки не было — hh.ru
                     // отклонял отклик с длинным письмом, а бот считал это ошибкой.
@@ -1457,13 +2775,13 @@
                     this._saveTimer = setTimeout(() => this.saveSettings(), 500);
                 });
                 addListener($('hh-auto-next'), 'change', e => { this.settings.autoNextPage = e.target.checked; this.debouncedSave(); });
-                addListener($('hh-skip-responded'), 'change', e => { this.settings.skipResponded = e.target.checked; this.debouncedSave(); });
-                addListener($('hh-filter-organizations'), 'change', e => { this.settings.filterOrganizations = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-skip-responded'), 'change', e => { this.settings.skipResponded = e.target.checked; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-filter-organizations'), 'change', e => { this.settings.filterOrganizations = e.target.checked; this.debouncedSave(); this.updateCount(); });
                 // [FIX] min/max у input'а браузер не навязывает при ручном вводе —
                 // раньше сюда проходили и 100 секунд, и 0.001. Зажимаем и возвращаем в поле.
                 addListener($('hh-delay'), 'change', e => { this.settings.delay = clampNum(e.target.value, 0.3, 5, 0.5); e.target.value = this.settings.delay; this.debouncedSave(); });
-                addListener($('hh-filter-text'), 'input', e => { this.filteredOrganizations = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
-                addListener($('hh-title-stopwords'), 'input', e => { this.titleStopWords = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
+                addListener($('hh-filter-text'), 'input', e => { this.filteredOrganizations = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); this._debouncedCount(); });
+                addListener($('hh-title-stopwords'), 'input', e => { this.titleStopWords = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); this._debouncedCount(); });
                 // [NEW] Ночной режим
                 addListener($('hh-night-mode'), 'change', e => {
                     this.settings.nightModeEnabled = e.target.checked;
@@ -1474,17 +2792,55 @@
                 });
                 addListener($('hh-night-from'), 'change', e => { this.settings.nightModeFrom = clampNum(e.target.value, 0, 23, 23, true); e.target.value = this.settings.nightModeFrom; this.debouncedSave(); });
                 addListener($('hh-night-to'),   'change', e => { this.settings.nightModeTo   = clampNum(e.target.value, 0, 23, 8,  true); e.target.value = this.settings.nightModeTo;   this.debouncedSave(); });
+                addListener($('hh-random-skip'), 'change', e => { this.settings.randomSkipPercent = clampNum(e.target.value, 0, 50, 5, true); e.target.value = this.settings.randomSkipPercent; this.debouncedSave(); });
+                // [NEW] Фильтры вакансии
+                // Меняются только настройки фильтра, сами данные вакансий те же —
+                // перезапрашивать страницу незачем, достаточно пересчитать счётчик.
+                const reFilter = () => this.updateCount();
+                addListener($('hh-sort-competition'), 'change', e => { this.settings.sortByCompetition = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-max-competitors'), 'change', e => { this.settings.maxCompetitors = clampNum(e.target.value, 0, 100000, 0, true); e.target.value = this.settings.maxCompetitors; this.debouncedSave(); reFilter(); });
+                addListener($('hh-min-salary'), 'change', e => { this.settings.minSalary = clampNum(e.target.value, 0, 100000000, 0, true); e.target.value = this.settings.minSalary; this.debouncedSave(); reFilter(); });
+                addListener($('hh-salary-required'), 'change', e => { this.settings.salaryRequired = e.target.checked; this.debouncedSave(); reFilter(); });
+                addListener($('hh-work-format'), 'change', e => { this.settings.workFormat = e.target.value; this.debouncedSave(); reFilter(); });
+                addListener($('hh-max-experience'), 'change', e => { this.settings.maxExperience = e.target.value; this.debouncedSave(); reFilter(); });
+                addListener($('hh-max-age'), 'change', e => { this.settings.maxAgeDays = clampNum(e.target.value, 0, 365, 0, true); e.target.value = this.settings.maxAgeDays; this.debouncedSave(); reFilter(); });
+                addListener($('hh-skip-internship'), 'change', e => { this.settings.skipInternship = e.target.checked; this.debouncedSave(); reFilter(); });
+                addListener($('hh-title-required'), 'input', e => { this.titleRequiredWords = e.target.value.split(',').map(o => o.trim()).filter(o => o); this.debouncedSave(); this._debouncedCount(); });
+                addListener($('hh-letter-b'), 'input', e => {
+                    if (e.target.value.length > 2000) e.target.value = e.target.value.slice(0, 2000);
+                    this.coverLetterB = e.target.value;
+                    const cc = $('hh-char-count-b'); if (cc) cc.textContent = e.target.value.length + '/2000';
+                    this.debouncedSave();
+                });
+                addListener($('hh-my-skills'), 'input', e => { this.mySkills = e.target.value.split(',').map(o => o.trim()).filter(o => o); this._skillCache = new Map(); this.debouncedSave(); this._debouncedCount(); });
+                addListener($('hh-min-skill-match'), 'change', e => { this.settings.minSkillMatch = clampNum(e.target.value, 0, 20, 0, true); e.target.value = this.settings.minSkillMatch; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-min-rating'), 'change', e => { this.settings.minEmployerRating = clampNum(e.target.value, 0, 5, 0); e.target.value = this.settings.minEmployerRating; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-min-review-rate'), 'change', e => { this.settings.minReviewRate = clampNum(e.target.value, 0, 100, 0, true); e.target.value = this.settings.minReviewRate; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-prefer-online'), 'change', e => { this.settings.preferManagerOnline = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-only-online'), 'change', e => { this.settings.onlyManagerOnline = e.target.checked; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-max-repost'), 'change', e => { this.settings.maxRepostDays = clampNum(e.target.value, 0, 365, 0, true); e.target.value = this.settings.maxRepostDays; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-min-reviews'), 'change', e => { this.settings.minReviewsForRating = clampNum(e.target.value, 1, 100, 3, true); e.target.value = this.settings.minReviewsForRating; this.debouncedSave(); this.updateCount(); });
+                addListener($('hh-deep-match'), 'change', e => { this.settings.deepMatch = e.target.checked; this.debouncedSave(); this.updateStatus(e.target.checked ? 'Точное сопоставление включено (+~0.8 с на вакансию)' : 'Точное сопоставление выключено'); });
+                addListener($('hh-sort-skills'), 'change', e => { this.settings.sortBySkills = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-search-queue'), 'input', e => { this.searchQueue = e.target.value.split('\n').map(o => o.trim()).filter(o => o); this.debouncedSave(); });
+                addListener($('hh-title-only'), 'change', e => { this.settings.searchInTitleOnly = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-order-fresh'), 'change', e => { this.settings.orderByFresh = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-no-agency'), 'change', e => { this.settings.labelNoAgency = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-accredited-it'), 'change', e => { this.settings.labelAccreditedIt = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-low-performance'), 'change', e => { this.settings.labelLowPerformance = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-server-filters'), 'change', e => { this.settings.serverSideFilters = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-optimize-search'), 'click', () => this.optimizeSearchManually());
+                addListener($('hh-bump-resume'), 'click', () => this.bumpResumes(false));
+                addListener($('hh-import-autosearch'), 'click', () => this.importSavedSearches());
+                addListener($('hh-blacklist-hh'), 'click', () => this.blacklistFilteredEmployers());
+                addListener($('hh-auto-bump'), 'change', e => { this.settings.autoBumpResume = e.target.checked; this.debouncedSave(); this._startBumpWatcher(); this.updateStatus(e.target.checked ? 'Автоподнятие резюме включено (раз в 4 ч)' : 'Автоподнятие выключено'); });
+                addListener($('hh-favorite-tests'), 'change', e => { this.settings.favoriteSkippedTests = e.target.checked; this.debouncedSave(); });
+                addListener($('hh-notify-invites'), 'change', e => { this.settings.notifyInvites = e.target.checked; this.debouncedSave(); this._startInviteWatcher(); this.updateStatus(e.target.checked ? 'Уведомления о приглашениях включены' : 'Уведомления выключены'); });
+                addListener($('hh-conversion'), 'click', () => this.showConversion());
+                addListener($('hh-export-csv'), 'click', () => this.exportResponsesCsv());
 
                 if (this._updateCountInterval) clearInterval(this._updateCountInterval);
                 this._updateCountInterval = setInterval(() => this.updateCount(), 5000);
-            }
-
-            toggleSettings() {
-                this.settingsCollapsed = !this.settingsCollapsed;
-                const c = document.getElementById('hh-settings-content');
-                const a = document.getElementById('hh-settings-arrow');
-                if (c) c.style.display = this.settingsCollapsed ? 'none' : 'block';
-                if (a) a.textContent = this.settingsCollapsed ? '\u25B6' : '\u25BC';
             }
 
             toggleTheme() { this.theme = this.theme === 'dark' ? 'light' : 'dark'; this.saveSettings(); }
@@ -1497,15 +2853,39 @@
             updateStatsDisplay() {
                 const el = document.getElementById('hh-stats');
                 if (!el) return;
-                el.textContent = '✅' + this.stats.success + ' ❌' + this.stats.failed + ' ⏭️' + this.stats.skipped
-                               + ' | 📅' + this._dailyCount() + '/200';
+                const used = this._dailyCount();
+                const left = Math.max(0, 198 - used);
+                // Счётчики сессии и суточный лимит разведены: лимит показывает
+                // отдельная полоса под метриками, дублировать его здесь незачем —
+                // строка не помещалась и переносилась на две.
+                el.textContent = '✅' + this.stats.success + '  ❌' + this.stats.failed + '  ⏭️' + this.stats.skipped;
+                const qt = document.getElementById('hh-quota-text');
+                if (qt) qt.textContent = used + ' / 198';
+                const qb = document.getElementById('hh-quota-bar');
+                if (qb) qb.style.width = Math.min(100, Math.round(used / 198 * 100)) + '%';
+                el.title = left <= 10 ? 'Суточный лимит hh.ru почти исчерпан' : '';
                 this.debouncedSave();
+            }
+
+            // [FIX залипший счётчик] Текстовые фильтры (организации, стоп-слова,
+            // белый список) меняли состояние, но счётчик «Найдено» не трогали и
+            // ждали 5-секундный интервал — цифра всё это время врала. Остальные
+            // фильтры пересчитывают сразу, теперь и эти. Дебаунс, потому что
+            // событие input прилетает на каждый символ, а пересчёт обходит все
+            // карточки выдачи.
+            _debouncedCount() {
+                clearTimeout(this._countTimer);
+                this._countTimer = setTimeout(() => this.updateCount(), 300);
             }
 
             updateCount() {
                 const el = document.getElementById('hh-count');
                 if (!el) return;
                 if (this.isRunning) return;
+                // Панель свёрнута — считать нечего и некому показывать.
+                // getAvailableButtons() обходит все 50 карточек с DOM-запросами,
+                // и раз в 5 секунд это заметно на слабой машине.
+                if (this.panel && this.panel.style.display === 'none') return;
                 el.textContent = this.getAvailableButtons().length;
             }
 
@@ -1536,6 +2916,16 @@
                         reason = 'фильтр орг.';
                     } else if (this.isFilteredTitle(b)) {
                         reason = 'стоп-слово в названии';
+                    } else if (!this.isRequiredTitle(b)) {
+                        reason = 'нет обязательного слова в названии';
+                    } else if (!this.isReviewRateOk(b)) {
+                        const er = this.employerRates[String(this.getEmployerIdFromCard(b))];
+                        reason = 'разбирает ' + (er ? er.rate : '?') + '% откликов';
+                    } else if (!this.isRatingOk(b)) {
+                        const rr = this._employerRating(b);
+                        reason = 'рейтинг ' + (rr ? rr.rating : '?') + ' ниже ' + this.settings.minEmployerRating;
+                    } else if (this._metaReject(this._metaFor(this.getVacancyId(b)))) {
+                        reason = this._metaReject(this._metaFor(this.getVacancyId(b))) || 'фильтр вакансии';
                     } else {
                         const vid = this.getVacancyId(b);
                         if (vid && this.skippedVacancies.has('id_' + vid)) {

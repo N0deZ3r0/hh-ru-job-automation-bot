@@ -53,6 +53,18 @@ eq(bot._renderCoverLetter('Python-разработчик', 'ООО Ромашк�
 eq(bot._renderCoverLetter('Python-разработчик', null),
    'Здравствуйте! Заинтересовала вакансия Python-разработчик в компании {компания}. С уважением, Алексей',
    'нет компании — плейсхолдер остаётся, письмо не ломается');
+// Многострочное письмо: строка с незаполненной подстановкой выбрасывается
+// целиком — иначе работодатель получал «Мой опыт: {навыки}» буквально.
+bot.mySkills = [];
+bot._currentSkills = [];
+bot.coverLetter = ['Здравствуйте!', '', 'Вакансия {вакансия}.', '', 'Мой опыт: {навыки}.', '', 'С уважением'].join('\n');
+eq(bot._renderCoverLetter('Frontend', 'Ромашка'),
+   ['Здравствуйте!', '', 'Вакансия Frontend.', '', 'С уважением'].join('\n'),
+   'нет навыков — строка с подстановкой выброшена, остальное цело');
+bot._currentSkills = ['JavaScript', 'Linux'];
+eq(bot._renderCoverLetter('Frontend', 'Ромашка'),
+   ['Здравствуйте!', '', 'Вакансия Frontend.', '', 'Мой опыт: JavaScript, Linux.', '', 'С уважением'].join('\n'),
+   'навыки подставлены');
 bot.coverLetter = 'Вакансия {VACANCY} / {Компания}';
 eq(bot._renderCoverLetter('Data Scientist', 'HeadHunter'), 'Вакансия Data Scientist / HeadHunter', 'регистронезависимо');
 bot.coverLetter = 'Без плейсхолдеров вовсе';
