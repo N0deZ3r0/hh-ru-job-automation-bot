@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HH Авто-отклик Pro",
-  "version": "2.4",
+  "version": "2.5",
   "minimum_chrome_version": "111",
   "description": "Авто-отклик HH.ru с максимальной WASM защитой",
   "permissions": [

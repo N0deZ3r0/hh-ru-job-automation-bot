@@ -1,257 +1,143 @@
-<div align="center">
+# HH Auto-Responder Pro
 
-<img src="icons/icon128.png" width="88" alt="HH Auto Responder Pro">
+A Chrome extension that applies to hh.ru vacancies for you — and is picky about which ones.
 
-# HH Auto Responder Pro
+A typical auto-applier clicks "Respond" down the whole result list. This one first reads the data hh.ru ships to the browser but **never renders**: how many people already applied, whether a test assignment is required, how long the posting has really been recycled, whether the recruiter is online right now. Only then does it decide whether a vacancy is worth one of your 200 daily applications.
 
-**A Chrome extension that applies to hh.ru vacancies for you, skips the ones that
-demand a test, and keeps the machine doing it from standing out.**
+[Русская версия](README.ru.md) · [Install](#install) · [How it works](#what-the-extension-sees-and-you-dont) · [Settings](#settings)
 
-[![CI](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/N0deZ3r0/hh-ru-job-automation-bot?label=release)](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/releases/latest)
-[![License](https://img.shields.io/github/license/N0deZ3r0/hh-ru-job-automation-bot?color=blue)](LICENSE)
-![Manifest V3](https://img.shields.io/badge/manifest-v3-4285F4?logo=googlechrome&logoColor=white)
-![Chrome 111+](https://img.shields.io/badge/Chrome-111%2B-4285F4?logo=googlechrome&logoColor=white)
+![Extension interface](docs/panel.svg)
 
-**English** · [Русский](README.ru.md)
-
-</div>
+> The interface diagram is hand-drawn SVG mirroring the actual panel markup — same tabs, colours and labels.
 
 ---
 
-## At a glance — v2.4
+## Why bother
 
-| Component | Status |
-|-----------|--------|
-| Applications per run | Paced 0.3–5 s apart, capped at hh.ru's daily 200 |
-| Test vacancies | Detected in a hidden iframe and skipped |
-| CV selection | Automatic, by title match (0–100% threshold) |
-| Cover letter | Optional, with `{vacancy}` / `{company}` placeholders |
-| Filters | Employer list, auto-learned list, title stop-words |
-| Night mode | Pause on a schedule (0–23 h) |
-| Persistence | `chrome.storage`, invisible to the page |
-| Backup | JSON export / import |
-| Session log | Last 30 runs |
-| WASM core | 842 bytes, 8 functions, built from source |
-| Tracker blocking | 21 domains, 22 declarativeNetRequest rules |
-| Fingerprint defence | GPU, canvas, audio, text metrics, WebGL precision |
+hh.ru caps you at 200 applications per day. The problem was never clicking a button 200 times — it is deciding **where** those 200 go.
 
-## Background
+Measured on a live `javascript` / Moscow search, 50 vacancies per page:
 
-HeadHunter took the video down. It showed a plain bot with no protection at all.
-This is the answer to that.
+| What the list shows | What is actually true |
+|---|---|
+| "Posted today" | 11 of 50 have a creation-to-republication gap of **over a month**; the record is 114 days |
+| Every card looks the same | 9 of 50 require a **test assignment**, with no hint on the card |
+| Sorted "by relevance" | competitors' median application count is **273**; with `order_by=publication_time` it drops to **13** at identical coverage |
+| Searching for "javascript" | an excavator-operator vacancy shows up — hh.ru searches the full text, not the title |
 
-## Installation
+The extension acts on that data instead of on card order.
 
-| Step | Action |
-|------|--------|
-| 1 | Download or clone the repository |
-| 2 | Open `chrome://extensions/` |
-| 3 | Enable **Developer mode** |
-| 4 | Click **Load unpacked** |
-| 5 | Select the project folder |
+---
 
-No build step is required — the compiled `protect.wasm` is committed. On the first
-hh.ru page a floating rocket button appears; it opens the control panel.
+## What the extension sees and you don't
 
-A packaged ZIP is attached to every [release](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/releases/latest)
-if you would rather not clone the repository.
+hh.ru embeds a JSON blob with every vacancy into each search page. It carries fields the card markup never shows:
 
-## How it works
+| Field | What it buys you |
+|---|---|
+| `userTestPresent` | test assignments detected **before** applying — 14 ms for the whole page instead of loading every vacancy |
+| `responsesCount` | real competition per vacancy; the queue is sorted least-contested first |
+| `creationTime` vs `publicationTime` | zombie postings: "today" can mean "created four months ago" |
+| `employerManager.latestActivity` | online recruiters carry a median of 72 applications against 237 for offline ones |
+| `@responseLetterRequired` | a mandatory letter is sent even when cover letters are switched off |
+| `keySkills` from the vacancy page | the `{навыки}` placeholder receives only the skills this vacancy actually asks for |
 
-The bot walks the search results page, filters out what you told it to skip, and
-opens each remaining vacancy's response form.
+On top of that, hh.ru's own server-side filters are pushed straight into the search URL: `search_field=name`, `label=not_from_agency`, `label=accredited_it`, `label=low_performance`, `work_format`, `experience`, `salary`, `search_period`. The server returns an already-filtered page, so the bot no longer throws away 45 cards out of 50 after loading them.
 
-Before applying it opens the response page in an off-screen iframe and looks for
-the four signals of an employer test — `startedWithQuestion=false` in the URL, an
-`input[name="testRequired"]`, a `test-description` block, or
-`employer-asking-for-test`. If any of them fire the vacancy is skipped and the
-employer is remembered, so their other listings are skipped too.
+---
 
-Pacing is deliberately irregular: a short pause, a main pause, and occasionally a
-longer one, plus scrolling and mouse movement toward the button before the click.
+## Install
 
-## Features
+The extension is not on the Chrome Web Store; load it unpacked.
 
-| Feature | Description |
-|---------|-------------|
-| Daily limit | Counts per calendar day and stops at hh.ru's 200 |
-| Auto page turn | Follows the pager to the end of the results |
-| Skip already applied | Recognises cards that already carry a response status |
-| Employer filter | Manual list, matched on partial names |
-| Auto-filter | Learns employers whose vacancies require a test |
-| Title stop-words | Skips by job title; matches Russian inflection by stem |
-| Cover letter | `{vacancy}` and `{company}` are filled per vacancy, trimmed to 2000 chars |
-| CV selection | Picks the CV whose title best matches the vacancy |
-| Night mode | Pauses between two hours and resumes by itself |
-| Error handling | Pauses after repeated failures, reloads and resumes after eight |
-| SPA recovery | Survives `pushState` / `replaceState` / `popstate` navigation |
-| Duplicate protection | Skipped vacancies persist across sessions |
-| Themes | Dark / light |
+1. Download `hh-auto-responder-v2.5.zip` from the [latest release](../../releases/latest) and unzip it.
+2. Open `chrome://extensions/`.
+3. Enable **Developer mode** (top right).
+4. **Load unpacked** → pick the folder.
+5. Open hh.ru — the panel appears on the right.
 
-## Control panel
+Chrome 111+ required. The extension itself has no dependencies; `npm` is only needed to build the WASM module and run tests.
 
-| Button | Function |
-|--------|----------|
-| Start | Run over the whole results list |
-| Test | Process a single vacancy |
-| Stop | Stop and save |
-| Analyse | Counts on the current page |
-| Test filter | Explains why each vacancy is allowed or blocked |
-| Auto-filter | Shows the learned employer list |
-| Clear | Reset history and statistics |
-| Clear auto-filter | Reset only the learned list |
-| Export / Import | JSON backup |
-| Log | History of the last 30 runs |
+---
 
 ## Settings
 
-| Setting | Range |
-|---------|-------|
-| Delay | 0.3–5 s |
-| Auto page turn | On / off |
-| Skip already applied | On / off |
-| Employer filter | On / off + list |
-| Auto-filter | On / off |
-| Title stop-words | List |
-| Automatic CV choice | On / off |
-| Match threshold | 0–100% |
-| Skip cover letter | On / off |
-| Night mode | On / off + hours (0–23) |
+The panel is split into six tabs.
 
-## Fingerprint defence
+**Filters** — queue priority (least competition, recruiter online) plus rejection rules: maximum applications per vacancy, minimum salary, freshness, recycling age, work format, experience, employer rating and the share of applications they actually review. Blocklists and allowlists for words and organisations live here too.
 
-The extension runs in two isolated worlds: `hh-protect.js` patches the page's own
-APIs in the MAIN world, while `core.js`, the UI and the bot live in the ISOLATED
-world where the page cannot reach them.
+**Letter** — a template with `{вакансия}`, `{компания}` and `{навыки}` placeholders, plus a second variant for A/B testing. A line whose placeholder cannot be filled is dropped entirely, so no employer ever receives a literal `{навыки}`.
 
-**What is spoofed** — only things the server cannot cross-check against the
-request it already received:
+**Skills** — your list, a match threshold and precise matching against the vacancy page.
 
-| Vector | Method |
-|--------|--------|
-| WebGL renderer | One of 9 GPUs, picked once and stored |
-| Canvas | One colour channel of ~half the pixels shifted by ±1, alpha untouched |
-| Text metrics | `measureText` widths shifted by at most 2e-5 relative |
-| Audio | `AudioBuffer` samples shifted below the audible floor |
-| Shader precision | Normalised to the values every desktop GPU reports |
-| Max anisotropy | Fixed at 16 |
-| WebRTC | Private ICE candidates filtered out |
-| `navigator.webdriver` | Forced to `false` |
-| Fonts | `document.fonts.check` limited to an 18-font allow-list |
+**Search** — pushing filters to hh.ru's side and a queue of search URLs: when one is exhausted the bot moves to the next.
 
-**What is deliberately left alone.** The extension does not rewrite outgoing HTTP
-headers, so the server always sees the real `User-Agent`, `Sec-CH-UA` and
-`Accept-Language`. Claiming a different browser, locale, timezone or screen size
-in JavaScript would contradict headers the site has already read — a mismatch no
-genuine machine produces, which makes the browser *more* identifiable rather than
-less. The profile therefore mirrors the real browser for all of those, and a
-patched getter is installed only where the value actually differs.
+**hh.ru** — bumping your CV in search (optionally every four hours), bookmarking vacancies skipped over a test, the server-side blocklist, importing saved searches.
 
-If you want locale or user-agent spoofing back, it has to be done together with
-`declarativeNetRequest` header rewriting so that JavaScript and the headers agree.
-
-All noise is deterministic: each value is derived from the session seed and the
-element's index, so reading the same canvas twice returns the same pixels. A
-fingerprint that changes between two reads is itself an anomaly.
-
-### Network filtering
-
-`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `sendBeacon` are
-wrapped, and 21 tracker domains are blocked both there and by 22
-declarativeNetRequest rules. Requests to loopback and private ranges
-(`127.0.0.1`, `192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `::1`, `fc00::/7`)
-are refused.
-
-## The WASM module
-
-`protect.wasm` is built from [`wasm/protect.wat`](wasm/protect.wat) — 842 bytes,
-no imports, no allocator. JavaScript writes into its memory at a fixed offset and
-grows it as needed.
-
-```bash
-npm install          # only needed to rebuild
-npm run build:wasm   # wasm/protect.wat -> protect.wasm
-npm test             # module + unit tests
-```
-
-The compiled binary is committed, so installing the extension needs no toolchain.
-
-## Tests
-
-```bash
-npm test
-```
-
-| Suite | Covers |
-|-------|--------|
-| `wasm/test.mjs` | Determinism, clamping, alpha, seed separation, canvas size rule, noise bounds |
-| `test/protect.mjs` | `core.js` and `hh-protect.js` |
-| `test/bot.mjs` | `content.js` |
-
-The suites read the sources as text and extract the real functions, so they test
-the code that ships rather than a copy. CI runs them together with the manifest
-and JSON validation on every push and pull request.
-
-## Releases
-
-Releases are built by CI from a tag:
-
-```bash
-git tag v2.4
-git push origin v2.4
-```
-
-The workflow validates the sources, runs every test suite, rebuilds
-`protect.wasm` from `wasm/protect.wat` and compares it byte for byte with the
-committed binary, checks that the tag matches the version in `manifest.json`,
-packs the extension and publishes the release with generated notes.
-
-The archive holds the extension runtime only — the WASM source, tests, scripts
-and documentation stay in the repository. Builds are reproducible: the ZIP uses
-fixed timestamps, so the same commit always produces the same file.
-
-```bash
-npm run pack               # dist/hh-auto-responder-v<version>.zip
-node scripts/pack.mjs --list   # what would go into it
-npm run check:wasm         # binary still matches its source?
-```
-
-Running the workflow manually (**Actions → Release → Run workflow**) builds the
-archive and uploads it as a build artifact without publishing anything.
-
-## Project layout
-
-| File | Role |
-|------|------|
-| `manifest.json` | MV3 manifest, two content-script worlds |
-| `background.js` | Service worker; builds the profile and injects it into MAIN |
-| `hh-protect.js` | MAIN world — all fingerprint patches |
-| `protect.js` | Loader for `protect.wasm` |
-| `core.js` | ISOLATED world — WASM load, network filtering, SPA recovery |
-| `ui.js` | Control panel markup |
-| `content.js` | Bot logic |
-| `rules.json` | declarativeNetRequest rules |
-| `wasm/` | WASM source, build script, module tests |
-| `scripts/` | Packing and release notes |
-| `test/` | Unit tests |
-
-## Requirements
-
-| Parameter | Value |
-|-----------|-------|
-| Browsers | Chrome 111+, Edge 111+, Opera 97+, Yandex Browser |
-| Node (development only) | 20+ |
-| License | MIT |
-
-## Contributing
-
-Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
-Found a security problem? [Report it privately](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/security/advisories/new)
-rather than in a public issue.
+**More** — pacing, night mode, conversion report, CSV export, settings backup.
 
 ---
 
-**Authors:** ALEX | Siarhei Karnach
+## Conversion report
 
-*Use it on your own account, for your own applications.*
+The "Конверсия" button reads application statuses from hh.ru and breaks them down three ways:
+
+- **by letter variant** — which text earns interviews;
+- **by CV** — computed from hh.ru's own data, so it covers manually sent applications too;
+- **by competition** — whether the sorting pays off, bucketed as under 20 / 20–50 / 50–200 / 200–500 / 500+.
+
+It also collects the "reviews N% of applications" figure that hh.ru only shows after you apply. The number belongs to the employer, so once learned it filters out that company's other vacancies.
+
+---
+
+## Fingerprint defence
+
+The extension spoofs exactly what cannot be cross-checked against request headers and **leaves alone** what can: user agent, language, timezone, memory and core count are taken from the real browser. Spoofing anything the headers contradict would itself be the tell.
+
+- Canvas and audio noise, text metrics and WebGL parameters are computed in an 842-byte WASM module with zero imports.
+- The noise seed is **stable per installation** and kept in `chrome.storage`. A fingerprint that changes every page load betrays automation more clearly than no defence at all.
+- Hooks are installed at `document_start`, ahead of every page script. The profile arrives later and merely fills in a live object — nothing is re-patched.
+- Patched functions are masked as native through `Function.prototype.toString`.
+- `declarativeNetRequest` blocks 22 advertising and tracking hosts.
+
+The extension does not solve CAPTCHAs. When a challenge appears the bot **stops** and asks for a human instead of hammering it with reloads.
+
+---
+
+## Development
+
+```bash
+npm ci            # only needed for the WASM build and tests
+npm test          # bot, protection and WASM module tests
+npm run validate  # JS/JSON syntax and manifest checks
+npm run build:wasm
+npm run check:wasm  # byte-compares protect.wasm against wasm/protect.wat
+npm run pack        # builds dist/hh-auto-responder-v2.5.zip
+```
+
+`protect.wasm` is committed so the extension installs without a toolchain. CI rebuilds it from `wasm/protect.wat` on every push and compares the bytes, so a binary that drifted from its source can never reach a release.
+
+Releases build automatically from a tag:
+
+```bash
+git tag v2.5 && git push origin v2.5
+```
+
+The tag must match `manifest.json` or the build fails. Release notes are generated from the repository itself: the change list from commits, the archive contents from the archive, and the SHA-256 computed on the spot.
+
+---
+
+## Limitations
+
+- hh.ru only, Chrome 111+.
+- The 200-per-day cap is enforced by hh.ru, not by the extension. The bot counts its own applications and stops at 198.
+- If your CV is hidden from an employer, hh.ru disables the apply button. The extension detects this and skips the vacancy, but the visibility setting can only be fixed in your account.
+- The "reviews N%" figure is only available after your first application to that company.
+
+## Responsibility
+
+This tool automates your own actions in your own account. Applications go out under your name and you answer for them. Fill in the cover letter and watch where the bot applies: by default hh.ru searches the full vacancy text rather than the title.
+
+## Licence
+
+[MIT](LICENSE)

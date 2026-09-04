@@ -1,6 +1,6 @@
 {
   "name": "hh-ru-job-automation-bot",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "description": "Инструменты разработки расширения: сборка protect.wasm и тесты. Само расширение зависимостей не имеет.",
   "scripts": {

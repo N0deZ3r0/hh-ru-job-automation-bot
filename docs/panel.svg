@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="560" viewBox="0 0 820 560" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">
+  <defs>
+    <linearGradient id="cta" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="820" height="560" fill="#0f0d18"/>
+
+  <!-- ЛЕВАЯ КОЛОНКА: панель -->
+  <g transform="translate(24,20)">
+    <rect width="380" height="520" rx="18" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+
+    <!-- шапка -->
+    <text x="18" y="30" fill="#a78bfa" font-size="14" font-weight="700">HH Авто-отклик</text>
+    <rect x="140" y="17" width="46" height="17" rx="5" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <text x="147" y="29" fill="#a78bfa" font-size="9" font-weight="700">WASM</text>
+    <rect x="290" y="14" width="46" height="24" rx="12" fill="#0f0d18" stroke="rgba(167,139,250,.22)"/>
+    <circle cx="326" cy="26" r="9" fill="#c4b5fd"/>
+    <text x="352" y="31" fill="#9b93bd" font-size="16">×</text>
+    <line x1="0" y1="48" x2="380" y2="48" stroke="rgba(167,139,250,.22)"/>
+
+    <!-- статус -->
+    <rect x="16" y="62" width="348" height="42" rx="10" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <text x="30" y="88" fill="#e8e6f5" font-size="12">Готов к работе</text>
+
+    <!-- метрики -->
+    <rect x="16" y="114" width="168" height="48" rx="9" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <text x="100" y="136" fill="#e8e6f5" font-size="16" font-weight="700" text-anchor="middle">34</text>
+    <text x="100" y="152" fill="#9b93bd" font-size="8" text-anchor="middle">НАЙДЕНО</text>
+    <rect x="196" y="114" width="168" height="48" rx="9" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <text x="280" y="136" fill="#e8e6f5" font-size="12" text-anchor="middle">✅23  ❌3  ⏭️4</text>
+    <text x="280" y="152" fill="#9b93bd" font-size="8" text-anchor="middle">ЗА СЕССИЮ</text>
+
+    <!-- суточный лимит -->
+    <text x="16" y="182" fill="#9b93bd" font-size="10">Суточный лимит hh.ru</text>
+    <text x="364" y="182" fill="#9b93bd" font-size="10" text-anchor="end">10 / 198</text>
+    <rect x="16" y="188" width="348" height="4" rx="2" fill="rgba(167,139,250,.22)"/>
+    <rect x="16" y="188" width="18" height="4" rx="2" fill="url(#bar)"/>
+
+    <!-- кнопки -->
+    <rect x="16" y="204" width="348" height="40" rx="10" fill="url(#cta)"/>
+    <text x="190" y="229" fill="#fff" font-size="13" font-weight="600" text-anchor="middle">▶ Начать авто-отклик</text>
+    <rect x="16" y="252" width="348" height="36" rx="10" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <text x="190" y="275" fill="#e8e6f5" font-size="12" font-weight="600" text-anchor="middle">🧪 Тест на одной вакансии</text>
+
+    <!-- вкладки -->
+    <rect x="12" y="300" width="356" height="32" rx="11" fill="rgba(255,255,255,.04)" stroke="rgba(167,139,250,.22)"/>
+    <rect x="16" y="304" width="60" height="24" rx="8" fill="rgba(167,139,250,.18)"/>
+    <text x="46"  y="320" fill="#a78bfa" font-size="10" font-weight="600" text-anchor="middle">Фильтры</text>
+    <text x="106" y="320" fill="#9b93bd" font-size="10" font-weight="600" text-anchor="middle">Письмо</text>
+    <text x="166" y="320" fill="#9b93bd" font-size="10" font-weight="600" text-anchor="middle">Навыки</text>
+    <text x="226" y="320" fill="#9b93bd" font-size="10" font-weight="600" text-anchor="middle">Поиск</text>
+    <text x="286" y="320" fill="#9b93bd" font-size="10" font-weight="600" text-anchor="middle">hh.ru</text>
+    <text x="340" y="320" fill="#9b93bd" font-size="10" font-weight="600" text-anchor="middle">Ещё</text>
+
+    <!-- содержимое вкладки -->
+    <text x="16" y="356" fill="#9b93bd" font-size="9" font-weight="700" letter-spacing="1">ПРИОРИТЕТ</text>
+    <rect x="16" y="366" width="14" height="14" rx="3" fill="#a78bfa"/>
+    <text x="22" y="377" fill="#141223" font-size="10" font-weight="700">✓</text>
+    <text x="38" y="377" fill="#e8e6f5" font-size="11" font-weight="600">Сначала с меньшей конкуренцией</text>
+    <rect x="16" y="388" width="14" height="14" rx="3" fill="none" stroke="rgba(167,139,250,.5)"/>
+    <text x="38" y="399" fill="#e8e6f5" font-size="11" font-weight="600">Сначала где рекрутёр онлайн</text>
+    <text x="16" y="416" fill="#9b93bd" font-size="9">У онлайн-рекрутёров медиана откликов 72 против 237</text>
+
+    <line x1="16" y1="428" x2="364" y2="428" stroke="rgba(167,139,250,.22)"/>
+    <text x="16" y="448" fill="#9b93bd" font-size="9" font-weight="700" letter-spacing="1">ОТСЕВ ВАКАНСИЙ</text>
+    <text x="16" y="470" fill="#e8e6f5" font-size="11">Макс. откликов</text>
+    <rect x="290" y="458" width="74" height="22" rx="8" fill="#241f38" stroke="rgba(167,139,250,.22)"/>
+    <text x="327" y="473" fill="#e8e6f5" font-size="11" text-anchor="middle">50</text>
+    <text x="16" y="498" fill="#e8e6f5" font-size="11">Макс. «висит», дней</text>
+    <rect x="290" y="486" width="74" height="22" rx="8" fill="#241f38" stroke="rgba(167,139,250,.22)"/>
+    <text x="327" y="501" fill="#e8e6f5" font-size="11" text-anchor="middle">30</text>
+  </g>
+
+  <!-- ПРАВАЯ КОЛОНКА: что даёт -->
+  <g transform="translate(436,20)">
+    <text x="0" y="18" fill="#e8e6f5" font-size="13" font-weight="700">Сигналы, которых нет в интерфейсе hh.ru</text>
+
+    <g transform="translate(0,36)">
+      <rect width="360" height="70" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Конкуренция за вакансию</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">responsesCount из стейта страницы.</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">Разброс 0…7076 при медиане 366.</text>
+    </g>
+
+    <g transform="translate(0,118)">
+      <rect width="360" height="70" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Тестовое задание — до отклика</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">userTestPresent. В карточке признака нет,</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">на выдаче такие 9 из 50.</text>
+    </g>
+
+    <g transform="translate(0,200)">
+      <rect width="360" height="70" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Вечные вакансии</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">creationTime против publicationTime:</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">«сегодня» = создана 114 дней назад.</text>
+    </g>
+
+    <g transform="translate(0,282)">
+      <rect width="360" height="70" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Активность рекрутёра</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">latestActivity: у «онлайн» медиана</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">откликов 72, у «офлайн» — 237.</text>
+    </g>
+
+    <g transform="translate(0,364)">
+      <rect width="360" height="70" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Навыки из вакансии в письмо</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">keySkills + описание. В {навыки} идут</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">только совпавшие с вашими.</text>
+    </g>
+
+    <g transform="translate(0,446)">
+      <rect width="360" height="76" rx="12" fill="#141223" stroke="rgba(167,139,250,.22)"/>
+      <text x="16" y="24" fill="#a78bfa" font-size="11" font-weight="700">Сортировка по свежести</text>
+      <text x="16" y="43" fill="#9b93bd" font-size="10">order_by=publication_time роняет медиану</text>
+      <text x="16" y="58" fill="#9b93bd" font-size="10">откликов у конкурентов с 273 до 13</text>
+      <text x="16" y="70" fill="#9b93bd" font-size="10">при том же охвате выдачи.</text>
+    </g>
+  </g>
+</svg>
