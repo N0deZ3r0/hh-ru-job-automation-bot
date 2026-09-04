@@ -1,0 +1,14 @@
+{
+  "name": "hh-ru-job-automation-bot",
+  "version": "2.4.0",
+  "private": true,
+  "description": "Инструменты разработки расширения: сборка protect.wasm и тесты. Само расширение зависимостей не имеет.",
+  "scripts": {
+    "build:wasm": "node wasm/build.mjs",
+    "test": "node test/protect.mjs && node test/bot.mjs && node wasm/test.mjs",
+    "validate": "node .github/scripts/validate.mjs js && node .github/scripts/validate.mjs json && node .github/scripts/validate.mjs manifest"
+  },
+  "devDependencies": {
+    "wabt": "^1.0.39"
+  }
+}

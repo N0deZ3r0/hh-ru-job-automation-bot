@@ -32,3 +32,11 @@ jobs:
 
       - name: Extension manifest
         run: node .github/scripts/validate.mjs manifest
+
+      - name: Unit tests
+        run: |
+          node test/protect.mjs
+          node test/bot.mjs
+
+      - name: WebAssembly module
+        run: node wasm/test.mjs

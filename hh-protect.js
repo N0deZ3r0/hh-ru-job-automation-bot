@@ -90,56 +90,8 @@
         if (_wasm) return _wasm;
         try {
             var w = window.__HH_WASM__;   // на случай, если модуль появится извне
-            return (w && typeof w.addCanvasNoise === 'function') ? w : null;
+            return (w && typeof w.canvasNoise === 'function') ? w : null;
         } catch(e) { return null; }
-    }
-
-    function _buildWasmWrapper(M) {
-        var enc = new TextEncoder();
-        function withBytes(bytes, fn) {
-            var p = M._malloc(bytes.length);
-            if (!p) return null;
-            try {
-                for (var i = 0; i < bytes.length; i++) M.setValue(p + i, bytes[i], 'i8');
-                return fn(p, bytes.length);
-            } finally { M._free(p); }
-        }
-        return {
-            addCanvasNoise: function(imageData) {
-                var px = imageData.data, len = px.length;
-                if (!len) return false;
-                var p = M._malloc(len);
-                if (!p) return false;
-                try {
-                    for (var i = 0; i < len; i++) M.setValue(p + i, px[i], 'i8');
-                    M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
-                    for (var j = 0; j < len; j++) px[j] = M.getValue(p + j, 'i8') & 0xFF;
-                    return true;
-                } finally { M._free(p); }
-            },
-            substituteTextWidth: function(width, text) {
-                var b = enc.encode(String(text));
-                var out = withBytes(new Uint8Array(b.length + 1), function(p) {
-                    for (var i = 0; i < b.length; i++) M.setValue(p + i, b[i], 'i8');
-                    M.setValue(p + b.length, 0, 'i8');
-                    return M._substitute_text_width(width, p);
-                });
-                return (typeof out === 'number' && isFinite(out)) ? out : width;
-            },
-            addAudioNoise: function(floatArray, intensity) {
-                var n = floatArray.length;
-                if (!n) return false;
-                var p = M._malloc(n * 4);
-                if (!p) return false;
-                try {
-                    for (var i = 0; i < n; i++) M.setValue(p + i * 4, floatArray[i], 'float');
-                    M._add_audio_noise(p, n, intensity);
-                    for (var j = 0; j < n; j++) floatArray[j] = M.getValue(p + j * 4, 'float');
-                    return true;
-                } finally { M._free(p); }
-            },
-            getWebGLMaxAnisotropy: function() { return M._get_webgl_max_anisotropy(); }
-        };
     }
 
     (function loadWasmIntoMainWorld() {
@@ -147,24 +99,14 @@
         if (!glueUrl || !binUrl) return;
         (async function() {
             try {
+                // Загрузчик выполняется внутри new Function: объявление
+                // HHProtectWasm остаётся локальным и не попадает в window,
+                // иначе страница увидела бы его и опознала расширение.
                 var src = await (await fetch(glueUrl)).text();
-                var factory = new Function(src + '\nreturn ProtectModule;')();
-                var M = await factory({ locateFile: function() { return binUrl; } });
-                // Сид — как в core.js, иначе шум будет одинаковым у всех
-                try {
-                    var sa = new Uint32Array(8);
-                    (_NativeGetRandValues || crypto.getRandomValues.bind(crypto))(sa);
-                    var sp = M._malloc(32);
-                    if (sp) {
-                        try {
-                            for (var i = 0; i < 8; i++) M.setValue(sp + i * 4, sa[i], 'i32');
-                            M._seed_random(sp, 8);
-                        } finally { M._free(sp); }
-                    }
-                } catch(e) {}
-                _wasm = _buildWasmWrapper(M);
+                var loader = new Function(src + '\nreturn HHProtectWasm;')();
+                _wasm = await loader.load(binUrl);
             } catch(e) {
-                // CSP, отсутствие ресурса, что угодно — остаёмся на JS-фолбэках
+                // CSP, недоступный ресурс, что угодно — остаёмся на JS-фолбэках
             }
         })();
     })();
@@ -292,12 +234,16 @@
         function applyCanvasNoise(canvas) {
             if (!canvas || !canvas.width || !canvas.height) return false;
             var wasm = getWasm();
-            // [ВАЖНО] should_skip_canvas_noise из WASM НЕ используется намеренно.
-            // Замер: 1x1, 16x16 и 200x60 он велит ПРОПУСТИТЬ, а 1920x1080 — шуметь.
-            // Это ровно наоборот: отпечаток снимают с маленьких холстов (200x60,
-            // 280x60, 300x150), а большие — настоящая графика страницы.
-            // Своё правило: шумим всё, кроме заведомо крупных холстов.
-            if (canvas.width * canvas.height > 1048576) return false;
+            // Решение о том, шуметь ли холст, принимает модуль: should_noise_canvas
+            // шумит всё до мегапикселя и пропускает крупные холсты со страничной
+            // графикой. В прежнем бинарнике эта эвристика была вывернута наизнанку
+            // (пропускала 200x60 и шумела 1920x1080), поэтому её приходилось
+            // обходить; в wasm/protect.wat она переписана и проверена тестами.
+            if (wasm && wasm.shouldNoiseCanvas) {
+                if (!wasm.shouldNoiseCanvas(canvas.width, canvas.height)) return false;
+            } else if (canvas.width * canvas.height > 1048576) {
+                return false;   // то же правило для JS-фолбэка
+            }
 
             if (!_has2d.has(canvas)) return false;
             try {
@@ -306,7 +252,7 @@
                 // Используем сохранённый оригинал — не проходим через патч getImageData
                 var imageData = origGID.call(ctx, 0, 0, canvas.width, canvas.height);
                 if (wasm) {
-                    try { wasm.addCanvasNoise(imageData); } catch(e) { jsCanvasNoise(imageData); }
+                    try { wasm.canvasNoise(imageData); } catch(e) { jsCanvasNoise(imageData); }
                 } else {
                     jsCanvasNoise(imageData);
                 }
@@ -437,12 +383,12 @@
         CanvasRenderingContext2D.prototype.measureText = function(text) {
             var tm = _origMeasureText.call(this, text);
             var w = getWasm();
-            if (!w || !w.substituteTextWidth) return tm;
+            if (!w || !w.textWidth) return tm;
             try {
                 var key = this.font + '\u0000' + String(text);
                 var val = _twCache.get(key);
                 if (val === undefined) {
-                    val = w.substituteTextWidth(tm.width, String(text));
+                    val = w.textWidth(tm.width, String(text));
                     if (_twCache.size > 500) _twCache.clear();
                     _twCache.set(key, val);
                 }
@@ -467,9 +413,9 @@
             AudioBuffer.prototype.getChannelData = function(channel) {
                 var data = _origGetChannelData.call(this, channel);
                 var w = getWasm();
-                if (w && w.addAudioNoise && data && !_audioNoised.has(data)) {
+                if (w && w.audioNoise && data && !_audioNoised.has(data)) {
                     _audioNoised.add(data);
-                    try { w.addAudioNoise(data, AUDIO_INTENSITY); } catch(e) {}
+                    try { w.audioNoise(data, AUDIO_INTENSITY); } catch(e) {}
                 }
                 return data;
             };
@@ -479,8 +425,8 @@
             AnalyserNode.prototype.getFloatFrequencyData = function(array) {
                 _origGFFD.call(this, array);
                 var w = getWasm();
-                if (w && w.addAudioNoise && array) {
-                    try { w.addAudioNoise(array, AUDIO_INTENSITY); } catch(e) {}
+                if (w && w.audioNoise && array) {
+                    try { w.audioNoise(array, AUDIO_INTENSITY); } catch(e) {}
                 }
             };
         }
@@ -496,7 +442,7 @@
             // MAX_TEXTURE_MAX_ANISOTROPY_EXT — тоже часть отпечатка GPU
             if (p === 0x84FF) {
                 var w = getWasm();
-                if (w && w.getWebGLMaxAnisotropy) { try { return w.getWebGLMaxAnisotropy(); } catch(e) {} }
+                if (w && w.maxAnisotropy) { try { return w.maxAnisotropy(); } catch(e) {} }
             }
             if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
             try { return origGP1.call(this, p); } catch(e) { return null; }
@@ -509,15 +455,40 @@
         // Такая пара «расширения нет, но параметры его есть» — готовый маркер.
         // Оставляем расширение на месте, подменяя только сами значения.
 
+        // [NEW] Точность шейдеров — ещё один параметр железа в отпечатке.
+        // Прежний модуль писал сюда 23/23/0 (precision=0 означает «не
+        // поддерживается» и ломало бы страницы), поэтому патч не ставился.
+        // Новый возвращает значения настоящего Chrome: float 127/127/23,
+        // int 31/30/0 — они одинаковы на всех десктопных GPU, так что
+        // подмена нормализует машины с нестандартным железом.
+        function _patchShaderPrecision(proto) {
+            var orig = proto.getShaderPrecisionFormat;
+            if (!orig) return;
+            proto.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                var real = orig.call(this, shaderType, precisionType);
+                var w = getWasm();
+                if (!w || !w.shaderPrecision || !real) return real;
+                try {
+                    var f = w.shaderPrecision(precisionType);
+                    Object.defineProperty(real, 'rangeMin',  { value: f.rangeMin,  configurable: true });
+                    Object.defineProperty(real, 'rangeMax',  { value: f.rangeMax,  configurable: true });
+                    Object.defineProperty(real, 'precision', { value: f.precision, configurable: true });
+                } catch(e) {}
+                return real;
+            };
+        }
+        _patchShaderPrecision(g1);
+
         if (typeof WebGL2RenderingContext !== 'undefined') {
             var g2 = WebGL2RenderingContext.prototype;
+            _patchShaderPrecision(g2);
             var origGP2 = g2.getParameter;
             g2.getParameter = function(p) {
                 if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
                 if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
                 if (p === 0x84FF) {
                     var w = getWasm();
-                    if (w && w.getWebGLMaxAnisotropy) { try { return w.getWebGLMaxAnisotropy(); } catch(e) {} }
+                    if (w && w.maxAnisotropy) { try { return w.maxAnisotropy(); } catch(e) {} }
                 }
                 if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
                 return origGP2.call(this, p);
@@ -975,6 +946,8 @@
         try { _markNative(window.Date, 'Date'); } catch(e) {}
         try { _markNative(Intl.DateTimeFormat, 'DateTimeFormat'); } catch(e) {}
         try { _markNative(Intl.DateTimeFormat.prototype.resolvedOptions, 'resolvedOptions'); } catch(e) {}
+        try { _markNative(WebGLRenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
+        try { if (typeof WebGL2RenderingContext !== 'undefined') _markNative(WebGL2RenderingContext.prototype.getShaderPrecisionFormat, 'getShaderPrecisionFormat'); } catch(e) {}
     } catch(e) {}
 
     } // конец функции initProtection

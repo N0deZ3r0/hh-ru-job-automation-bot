@@ -81,113 +81,15 @@
     window.__HH_WASM__ = null;
     window.__HH_CORE_READY__ = false;
 
-    const _enc = new TextEncoder();
-
-    function createWASMWrapper(M) {
-        function safeMalloc(size) {
-            const ptr = M._malloc(size);
-            if (!ptr) throw new Error('WASM malloc failed for ' + size + ' bytes');
-            return ptr;
-        }
-        
-        return {
-            // FIX: убран _M: M — экспонировал сырой WASM снаружи, нигде не использовался
-            
-            // ===== CANVAS NOISE (WASM) =====
-            addCanvasNoise(imageData) {
-                const px = imageData.data, len = px.length;
-                if (!len) return;
-                const p = safeMalloc(len);
-                try {
-                    // Быстрый путь через HEAPU8 — одно копирование вместо len вызовов setValue.
-                    // Heap перечитываем после вызова: WASM мог вырастить память.
-                    let heap = M.HEAPU8;
-                    if (heap && heap.length >= p + len) {
-                        heap.set(px, p);
-                        M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
-                        heap = M.HEAPU8;
-                        px.set(heap.subarray(p, p + len));
-                    } else {
-                        for (let i = 0; i < len; i++) M.setValue(p + i, px[i], 'i8');
-                        M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
-                        for (let i = 0; i < len; i++) px[i] = M.getValue(p + i, 'i8') & 0xFF;
-                    }
-                } finally {
-                    M._free(p);
-                }
-            },
-            shouldSkipCanvasNoise(w, h) { return M._should_skip_canvas_noise(w, h); },
-            
-            // ===== WEBGL =====
-            getFakeWebGLVendor() { return M.UTF8ToString(M._get_fake_webgl_vendor()); },
-            getFakeWebGLRenderer() { return M.UTF8ToString(M._get_fake_webgl_renderer()); },
-            getFakeWebGLParam(p) { return M._get_fake_webgl_param(p); },
-            getWebGLExtensions() {
-                const base = M._get_webgl_extensions();
-                if (!base) return [];
-                const result = [];
-                let offset = 0;
-                while (offset < 64) {
-                    const ptr = M.getValue(base + offset * 4, '*');
-                    if (!ptr) break;
-                    result.push(M.UTF8ToString(ptr));
-                    offset++;
-                }
-                return result;
-            },
-            getWebGLMaxAnisotropy() { return M._get_webgl_max_anisotropy(); },
-            
-            // ===== NAVIGATOR / SYSTEM =====
-            getFakePlatform() { return M.UTF8ToString(M._get_fake_platform()); },
-            getFakeHardwareConcurrency() { return M._get_fake_hardware_concurrency(); },
-            getFakeDeviceMemory() { return M._get_fake_device_memory(); },
-            getFakeVendor() { return M.UTF8ToString(M._get_fake_vendor()); },
-            getFakeWebdriver() { return M._get_fake_webdriver(); },
-            getFakeScreenWidth() { return M._get_fake_screen_width(); },
-            getFakeScreenHeight() { return M._get_fake_screen_height(); },
-            
-            // ===== LOCALE =====
-            getTimezone() { return M.UTF8ToString(M._get_timezone()); },
-            getLanguage() { return M.UTF8ToString(M._get_language()); },
-            
-            // ===== NETWORK =====
-            shouldBlockUrl(url) {
-                const b = _enc.encode(url);
-                const p = safeMalloc(b.length + 1);
-                try {
-                    for (let i = 0; i < b.length; i++) M.setValue(p + i, b[i], 'i8');
-                    M.setValue(p + b.length, 0, 'i8');
-                    return M._should_block_url(p, b.length) === 1;
-                } finally { M._free(p); }
-            }
-        };
-    }
-
     (async function loadWasm() {
-        // [FIX WASM retry] Счётчик локальный — не утекает в глобальное состояние
+        // [FIX] Модуль больше не эмскриптеновский: protect.js теперь маленький
+        // загрузчик, а сам protect.wasm пересобран из wasm/protect.wat.
         let wasmLoadAttempts = 0;
         async function attempt() {
             try {
-                if (typeof ProtectModule === 'function') {
-                    const M = await ProtectModule({
-                        locateFile: p => chrome.runtime.getURL(p)
-                    });
-
-                    // Инициализация seed для детерминированного шума
-                    const sa = new Uint32Array(8);
-                    crypto.getRandomValues(sa);
-                    const sp = M._malloc(8 * 4);
-                    if (sp) {
-                        try {
-                            for (let i = 0; i < 8; i++) M.setValue(sp + i * 4, sa[i], 'i32');
-                            M._seed_random(sp, 8);
-                        } finally {
-                            M._free(sp);
-                        }
-                    }
-
-                    window.__HH_WASM__ = createWASMWrapper(M);
-                    console.debug('[CORE] WASM загружен, Canvas noise доступен');
+                if (typeof HHProtectWasm === 'object' && HHProtectWasm && typeof HHProtectWasm.load === 'function') {
+                    window.__HH_WASM__ = await HHProtectWasm.load(chrome.runtime.getURL('protect.wasm'));
+                    console.debug('[CORE] WASM загружен');
                 }
             } catch(e) {
                 wasmLoadAttempts++;
@@ -202,6 +104,25 @@
         }
         attempt().catch(e => console.warn('[CORE] loadWasm unhandled:', e));
     })();
+
+    // [FIX] Список трекеров переехал из WASM в JS. В прежнем модуле его держала
+    // функция should_block_url, содержимое которой из бинарника было не видно;
+    // здесь он совпадает с rules.json, где те же хосты режет declarativeNetRequest.
+    // DNR блокирует на сетевом уровне, а эта проверка гасит сам вызов, чтобы
+    // страница не получала ERR_BLOCKED_BY_CLIENT и не считала запрос упавшим.
+    const BLOCKED_HOSTS = [
+        'targetads.io', 'weborama.ru', 'weborama.fr', 'weborama-tech.ru',
+        'skcrtxr.com', 'hybrid.ai', 'appsflyer.com', 'top-fwz1.mail.ru',
+        'r3.mail.ru', 'mc.yandex.ru', 'counter.yadro.ru', 'cdn.uxfeedback.ru',
+        'sdk-api.apptracer.ru', 'stats.vk-portal.net', 'akashi.vk-portal.net',
+        'tns-counter.ru', 'ads.adfox.ru'
+    ];
+    function isBlockedHost(host) {
+        for (const b of BLOCKED_HOSTS) {
+            if (host === b || host.endsWith('.' + b)) return true;
+        }
+        return false;
+    }
 
     // Сетевая блокировка
     function isLocal(url) {
@@ -224,16 +145,13 @@
             if (oldest) blockUrlCache.delete(oldest);
         }
         let result = false;
-        const W = window.__HH_WASM__;
-        if (W) { try { result = !!W.shouldBlockUrl(url); } catch(e) {} }
-        if (!result) {
-            try {
-                const u = new URL(String(url), location.href);
-                const h = u.hostname.toLowerCase();
-                if (['127.0.0.1','localhost','::1','0.0.0.0'].includes(h)) result = true;
-                else if (h.startsWith('192.168.') || h.startsWith('10.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) result = true;
-            } catch(e) {}
-        }
+        try {
+            const u = new URL(String(url), location.href);
+            const h = u.hostname.toLowerCase();
+            if (isBlockedHost(h)) result = true;
+            else if (['127.0.0.1','localhost','::1','0.0.0.0'].includes(h)) result = true;
+            else if (h.startsWith('192.168.') || h.startsWith('10.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) result = true;
+        } catch(e) {}
         blockUrlCache.set(url, { result, timestamp: now });
         return result;
     }
