@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an idea or an improvement
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in English or Russian, whichever you prefer.
+        **Пишите по-русски или по-английски — как удобнее.**
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: |
+        Describe the situation you are stuck in, not only the solution you have in mind.
+        Опишите проблему, а не только предлагаемое решение.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should it do?
+      description: Как это должно работать.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Что вы уже пробовали или рассматривали.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues / Я поискал среди существующих задач
+          required: true

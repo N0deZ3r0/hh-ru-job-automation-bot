@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / Уязвимость
+    url: https://github.com/N0deZ3r0/hh-ru-job-automation-bot/security/advisories/new
+    about: Report privately, not in a public issue. / Сообщите приватно, а не публичной задачей.
+  - name: Search existing issues / Поиск по задачам
+    url: https://github.com/N0deZ3r0/hh-ru-job-automation-bot/issues?q=is%3Aissue
+    about: Your question may already be answered. / Возможно, ответ уже есть.
