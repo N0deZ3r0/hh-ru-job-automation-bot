@@ -117,6 +117,12 @@ function buildProfile(selectedGPU, env) {
         timezone: env.timezone,
         clientHints: env.clientHints || {},
 
+        // Адреса WASM для MAIN world. chrome.runtime там недоступен, поэтому
+        // ссылки передаются через профиль — иначе hh-protect.js не может
+        // загрузить protect.wasm и остаётся на JS-фолбэках.
+        wasmGlueUrl: chrome.runtime.getURL('protect.js'),
+        wasmBinaryUrl: chrome.runtime.getURL('protect.wasm'),
+
         // screenWidth/screenHeight/devicePixelRatio намеренно ОТСУТСТВУЮТ.
         // Зашитые 1920x1080 были меньше реального окна (outerWidth 2008),
         // а outerWidth > screen.width физически невозможен — это был прямой маркер.

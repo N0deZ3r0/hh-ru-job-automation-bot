@@ -77,6 +77,98 @@
         return fn;
     };
 
+    // ── ЗАГРУЗКА WASM В MAIN WORLD ───────────────────────────────────────
+    // core.js грузит WASM в ISOLATED world, но патчи отпечатка живут здесь,
+    // в MAIN world, и это разные window — дотянуться до того экземпляра нельзя.
+    // Синхронные API (measureText, getParameter, getChannelData) исключают мост
+    // через postMessage, поэтому модуль инстанцируется прямо тут.
+    // chrome.runtime в MAIN world нет, ссылки приходят в профиле.
+    // Glue грузится через new Function, а не тегом <script>: иначе var ProtectModule
+    // стал бы неудаляемым свойством window и сам выдавал бы расширение странице.
+    var _wasm = null;
+    function getWasm() {
+        if (_wasm) return _wasm;
+        try {
+            var w = window.__HH_WASM__;   // на случай, если модуль появится извне
+            return (w && typeof w.addCanvasNoise === 'function') ? w : null;
+        } catch(e) { return null; }
+    }
+
+    function _buildWasmWrapper(M) {
+        var enc = new TextEncoder();
+        function withBytes(bytes, fn) {
+            var p = M._malloc(bytes.length);
+            if (!p) return null;
+            try {
+                for (var i = 0; i < bytes.length; i++) M.setValue(p + i, bytes[i], 'i8');
+                return fn(p, bytes.length);
+            } finally { M._free(p); }
+        }
+        return {
+            addCanvasNoise: function(imageData) {
+                var px = imageData.data, len = px.length;
+                if (!len) return false;
+                var p = M._malloc(len);
+                if (!p) return false;
+                try {
+                    for (var i = 0; i < len; i++) M.setValue(p + i, px[i], 'i8');
+                    M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
+                    for (var j = 0; j < len; j++) px[j] = M.getValue(p + j, 'i8') & 0xFF;
+                    return true;
+                } finally { M._free(p); }
+            },
+            substituteTextWidth: function(width, text) {
+                var b = enc.encode(String(text));
+                var out = withBytes(new Uint8Array(b.length + 1), function(p) {
+                    for (var i = 0; i < b.length; i++) M.setValue(p + i, b[i], 'i8');
+                    M.setValue(p + b.length, 0, 'i8');
+                    return M._substitute_text_width(width, p);
+                });
+                return (typeof out === 'number' && isFinite(out)) ? out : width;
+            },
+            addAudioNoise: function(floatArray, intensity) {
+                var n = floatArray.length;
+                if (!n) return false;
+                var p = M._malloc(n * 4);
+                if (!p) return false;
+                try {
+                    for (var i = 0; i < n; i++) M.setValue(p + i * 4, floatArray[i], 'float');
+                    M._add_audio_noise(p, n, intensity);
+                    for (var j = 0; j < n; j++) floatArray[j] = M.getValue(p + j * 4, 'float');
+                    return true;
+                } finally { M._free(p); }
+            },
+            getWebGLMaxAnisotropy: function() { return M._get_webgl_max_anisotropy(); }
+        };
+    }
+
+    (function loadWasmIntoMainWorld() {
+        var glueUrl = ID.wasmGlueUrl, binUrl = ID.wasmBinaryUrl;
+        if (!glueUrl || !binUrl) return;
+        (async function() {
+            try {
+                var src = await (await fetch(glueUrl)).text();
+                var factory = new Function(src + '\nreturn ProtectModule;')();
+                var M = await factory({ locateFile: function() { return binUrl; } });
+                // Сид — как в core.js, иначе шум будет одинаковым у всех
+                try {
+                    var sa = new Uint32Array(8);
+                    (_NativeGetRandValues || crypto.getRandomValues.bind(crypto))(sa);
+                    var sp = M._malloc(32);
+                    if (sp) {
+                        try {
+                            for (var i = 0; i < 8; i++) M.setValue(sp + i * 4, sa[i], 'i32');
+                            M._seed_random(sp, 8);
+                        } finally { M._free(sp); }
+                    }
+                } catch(e) {}
+                _wasm = _buildWasmWrapper(M);
+            } catch(e) {
+                // CSP, отсутствие ресурса, что угодно — остаёмся на JS-фолбэках
+            }
+        })();
+    })();
+
     function _def(obj, prop, value) {
         try {
             // FIX: геттер помечаем как native. Раньше
@@ -171,18 +263,6 @@
             return c;
         };
 
-        // FIX: hh-protect.js выполняется в MAIN world, а core.js кладёт __HH_WASM__
-        // в ISOLATED world — это РАЗНЫЕ window. Ссылка здесь всегда была null (да ещё
-        // и читалась на document_start, до окончания асинхронной загрузки WASM),
-        // поэтому шум к canvas не применялся НИКОГДА. Теперь: ищем WASM лениво —
-        // на случай, если он появится в MAIN world, — и всегда имеем JS-фолбэк.
-        function getWasm() {
-            try {
-                var w = window.__HH_WASM__;
-                return (w && typeof w.addCanvasNoise === 'function') ? w : null;
-            } catch(e) { return null; }
-        }
-
         // Сид стабилен в пределах сессии: один и тот же canvas даёт один и тот же
         // отпечаток при повторных чтениях, но разный между сессиями.
         var _canvasSeed = (function() {
@@ -212,13 +292,12 @@
         function applyCanvasNoise(canvas) {
             if (!canvas || !canvas.width || !canvas.height) return false;
             var wasm = getWasm();
-            if (wasm && wasm.shouldSkipCanvasNoise) {
-                try { if (wasm.shouldSkipCanvasNoise(canvas.width, canvas.height)) return false; } catch(e) {}
-            } else if (canvas.width * canvas.height > 4194304) {
-                // Без WASM-эвристики сами не трогаем гигантские холсты (>4 Мпикс) —
-                // это почти всегда реальная графика, а не снятие отпечатка.
-                return false;
-            }
+            // [ВАЖНО] should_skip_canvas_noise из WASM НЕ используется намеренно.
+            // Замер: 1x1, 16x16 и 200x60 он велит ПРОПУСТИТЬ, а 1920x1080 — шуметь.
+            // Это ровно наоборот: отпечаток снимают с маленьких холстов (200x60,
+            // 280x60, 300x150), а большие — настоящая графика страницы.
+            // Своё правило: шумим всё, кроме заведомо крупных холстов.
+            if (canvas.width * canvas.height > 1048576) return false;
 
             if (!_has2d.has(canvas)) return false;
             try {
@@ -343,6 +422,70 @@
         }
     })();
 
+    // ===== TEXT METRICS (WASM) =====
+    // Перечисление шрифтов делают не через document.fonts.check, а измеряя ширину
+    // строки в разных гарнитурах. Замер на живой машине: Arial 936.92, Wingdings
+    // 1046.84, Impact 832.08 — набор установленных шрифтов читался полностью,
+    // потому что measureText никто не трогал.
+    // substitute_text_width из WASM даёт детерминированный сдвиг ~0.0001-0.013%:
+    // вёрстку это не двигает, а таблицу ширин делает уникальной для профиля.
+    try {
+        var _origMeasureText = CanvasRenderingContext2D.prototype.measureText;
+        // Кеш держит значение стабильным в пределах сессии: повторное измерение
+        // той же строки тем же шрифтом обязано давать тот же результат.
+        var _twCache = new Map();
+        CanvasRenderingContext2D.prototype.measureText = function(text) {
+            var tm = _origMeasureText.call(this, text);
+            var w = getWasm();
+            if (!w || !w.substituteTextWidth) return tm;
+            try {
+                var key = this.font + '\u0000' + String(text);
+                var val = _twCache.get(key);
+                if (val === undefined) {
+                    val = w.substituteTextWidth(tm.width, String(text));
+                    if (_twCache.size > 500) _twCache.clear();
+                    _twCache.set(key, val);
+                }
+                // Подменяем width на самом объекте TextMetrics — instanceof и
+                // остальные поля остаются нативными.
+                Object.defineProperty(tm, 'width', { value: val, configurable: true, enumerable: true });
+            } catch(e) {}
+            return tm;
+        };
+    } catch(e) {}
+
+    // ===== AUDIO (WASM) =====
+    // Классический аудио-отпечаток: OfflineAudioContext + DynamicsCompressor,
+    // затем сумма отрендеренного буфера. Замер на живой машине давал стабильные
+    // 1079.88727944 — значение снималось без каких-либо помех.
+    // add_audio_noise сдвигает отсчёты примерно на 2e-5 (около -94 дБ) — неслышимо.
+    try {
+        var _audioNoised = new WeakSet();
+        var AUDIO_INTENSITY = 0.0001;
+        if (typeof AudioBuffer !== 'undefined' && AudioBuffer.prototype.getChannelData) {
+            var _origGetChannelData = AudioBuffer.prototype.getChannelData;
+            AudioBuffer.prototype.getChannelData = function(channel) {
+                var data = _origGetChannelData.call(this, channel);
+                var w = getWasm();
+                if (w && w.addAudioNoise && data && !_audioNoised.has(data)) {
+                    _audioNoised.add(data);
+                    try { w.addAudioNoise(data, AUDIO_INTENSITY); } catch(e) {}
+                }
+                return data;
+            };
+        }
+        if (typeof AnalyserNode !== 'undefined' && AnalyserNode.prototype.getFloatFrequencyData) {
+            var _origGFFD = AnalyserNode.prototype.getFloatFrequencyData;
+            AnalyserNode.prototype.getFloatFrequencyData = function(array) {
+                _origGFFD.call(this, array);
+                var w = getWasm();
+                if (w && w.addAudioNoise && array) {
+                    try { w.addAudioNoise(array, AUDIO_INTENSITY); } catch(e) {}
+                }
+            };
+        }
+    } catch(e) {}
+
     // ===== WEBGL =====
     try {
         var g1 = WebGLRenderingContext.prototype;
@@ -350,6 +493,11 @@
         g1.getParameter = function(p) {
             if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
             if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+            // MAX_TEXTURE_MAX_ANISOTROPY_EXT — тоже часть отпечатка GPU
+            if (p === 0x84FF) {
+                var w = getWasm();
+                if (w && w.getWebGLMaxAnisotropy) { try { return w.getWebGLMaxAnisotropy(); } catch(e) {} }
+            }
             if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
             try { return origGP1.call(this, p); } catch(e) { return null; }
         };
@@ -367,6 +515,10 @@
             g2.getParameter = function(p) {
                 if (p === 0x1F00 || p === 0x9245) return ID.webglVendor;
                 if (p === 0x1F01 || p === 0x9246) return ID.webglRenderer;
+                if (p === 0x84FF) {
+                    var w = getWasm();
+                    if (w && w.getWebGLMaxAnisotropy) { try { return w.getWebGLMaxAnisotropy(); } catch(e) {} }
+                }
                 if (ID.webglParams && ID.webglParams[p] !== undefined) return ID.webglParams[p];
                 return origGP2.call(this, p);
             };
@@ -800,6 +952,9 @@
         _nativeLookupSet.add(Function.prototype.toString);
         _markNative(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
         _markNative(HTMLCanvasElement.prototype.getContext, 'getContext');
+        try { _markNative(CanvasRenderingContext2D.prototype.measureText, 'measureText'); } catch(e) {}
+        try { if (typeof AudioBuffer !== 'undefined') _markNative(AudioBuffer.prototype.getChannelData, 'getChannelData'); } catch(e) {}
+        try { if (typeof AnalyserNode !== 'undefined') _markNative(AnalyserNode.prototype.getFloatFrequencyData, 'getFloatFrequencyData'); } catch(e) {}
         _markNative(HTMLCanvasElement.prototype.toBlob, 'toBlob');
         if (CanvasRenderingContext2D.prototype.getImageData) _markNative(CanvasRenderingContext2D.prototype.getImageData, 'getImageData');
         if (window.matchMedia) _markNative(window.matchMedia, 'matchMedia');
