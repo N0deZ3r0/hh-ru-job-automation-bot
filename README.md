@@ -1,91 +1,114 @@
-🚀 v2.3 — РЕЛИЗ
+<div align="center">
 
-| Компонент | Статус |
+<img src="icons/icon128.png" width="88" alt="HH Auto Responder Pro">
+
+# HH Auto Responder Pro
+
+**A Chrome extension that applies to hh.ru vacancies for you — behind five layers
+of fingerprint and tracker defence, so the site cannot profile the machine doing it.**
+
+[![CI](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/N0deZ3r0/hh-ru-job-automation-bot?label=release)](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/releases/latest)
+[![License](https://img.shields.io/github/license/N0deZ3r0/hh-ru-job-automation-bot?color=blue)](LICENSE)
+![Manifest V3](https://img.shields.io/badge/manifest-v3-4285F4?logo=googlechrome&logoColor=white)
+![Chrome 111+](https://img.shields.io/badge/Chrome-111%2B-4285F4?logo=googlechrome&logoColor=white)
+
+**English** · [Русский](README.ru.md)
+
+</div>
+
+---
+
+## 🚀 At a glance — v2.3
+
+| Component | Status |
 |-----------|--------|
-| 🧠 WebGL — подмена GPU | ✅ |
-| 🎲 Видеокарта | 9 вариантов, фиксация навсегда |
-| 🌍 Часовой пояс | Europe/Moscow |
-| 🇷🇺 Язык | ru-RU |
-| 🔧 WASM-ядро | 26 функций |
-| 🛡️ Блокировка трекеров | 32 правила DNR |
-| 🚀 Задержка | 4 уровня + ночной режим |
-| 🔄 SPA-восстановление | ✅ |
-| 🧪 Прямые отклики | iframe-изоляция |
-| 🎯 Автовыбор резюме | % совпадения |
-| 📄 Детектор тестов | скрытая проверка |
-| 💾 Сохранение | chrome.storage |
-| 🌙 Ночной режим | ✅ |
-| 💾 Экспорт/Импорт | JSON |
-| 📜 Лог сессий | 30 запусков |
+| 🧠 WebGL — GPU spoofing | ✅ |
+| 🎲 Graphics card | 9 variants, fixed permanently |
+| 🌍 Timezone | Europe/Moscow |
+| 🇷🇺 Language | ru-RU |
+| 🔧 WASM core | 26 functions |
+| 🛡️ Tracker blocking | 32 DNR rules |
+| 🚀 Delay | 4 levels + night mode |
+| 🔄 SPA recovery | ✅ |
+| 🧪 Direct applications | iframe isolation |
+| 🎯 Automatic CV choice | by match percentage |
+| 📄 Test detector | hidden check |
+| 💾 Persistence | chrome.storage |
+| 🌙 Night mode | ✅ |
+| 💾 Export / import | JSON |
+| 📜 Session log | 30 runs |
 
-## 📖 ИСТОРИЯ
+## 📖 Background
 
-HeadHunter удалил видео. На нём был просто бот без защиты.
+HeadHunter took the video down. It showed a plain bot with no protection at all.
 
-Теперь:
-- 5 рубежей обороны
-- 32 блокируемых домена
-- 26 WASM-функций
-- 11 перехваченных API
-- 2 уровня изоляции (MAIN / ISOLATED)
+Now there are:
 
-Спасибо за мотивацию. У них — проблема.
+- 5 lines of defence
+- 32 blocked domains
+- 26 WASM functions
+- 11 intercepted APIs
+- 2 isolation levels (MAIN / ISOLATED)
 
-## 📥 УСТАНОВКА
+Thanks for the motivation. The problem is theirs now.
 
-| Шаг | Действие |
-|-----|----------|
-| 1 | Скачайте файлы |
-| 2 | Откройте chrome://extensions/ |
-| 3 | Включите "Режим разработчика" |
-| 4 | Нажмите "Загрузить распакованное" |
-| 5 | Выберите папку |
+## 📥 Installation
 
-> После установки расширение само сгенерирует уникальный fingerprint. При первом запуске на hh.ru появится плавающая кнопка с ракетой.
+| Step | Action |
+|------|--------|
+| 1 | Download the files |
+| 2 | Open chrome://extensions/ |
+| 3 | Enable "Developer mode" |
+| 4 | Click "Load unpacked" |
+| 5 | Select the folder |
 
-## 🌟 ОСНОВНЫЕ ФУНКЦИИ
+> After installation the extension generates a unique fingerprint by itself. The
+> first time you open hh.ru a floating rocket button appears.
 
-| Функция | Описание |
-|---------|----------|
-| 🚀 Скорость | 0.3–5 сек на отклик |
-| 🧩 Автофильтр | Запоминает компании с тестами |
-| 🌙 Ночной режим | Пауза по расписанию (0–23 ч) |
-| 🎭 Темы | Тёмная / светлая |
-| 📈 Статистика | ✅ успех / ❌ ошибки / ⏭️ пропуски |
-| ⚙️ Настройки | 9 параметров |
-| 🚫 Чат | Закрывается сам |
-| 📝 Письмо | Можно отключить |
-| 🎯 Автовыбор резюме | 0–100% порог |
-| 🛑 Контроль лимита | ~200 откликов/день |
-| 🧪 Детектор тестов | iframe + тройная проверка |
-| 🔄 Автовозврат | URL + testRequired + test-description |
-| 🔒 Защита от повторов | Set + chrome.storage |
-| 🔄 SPA-восстановление | pushState/popstate/replaceState |
-| 💾 Ручной бэкап | Экспорт/Импорт JSON |
-| 📋 Лог сессий | История последних 30 запусков |
+## 🌟 Main features
 
-## 🛡️ ЗАЩИТА — 5 РУБЕЖЕЙ
+| Feature | Description |
+|---------|-------------|
+| 🚀 Speed | 0.3–5 seconds per application |
+| 🧩 Auto-filter | Remembers companies that use tests |
+| 🌙 Night mode | Pause on a schedule (0–23 h) |
+| 🎭 Themes | Dark / light |
+| 📈 Statistics | ✅ sent / ❌ errors / ⏭️ skipped |
+| ⚙️ Settings | 9 parameters |
+| 🚫 Chat | Closes itself |
+| 📝 Cover letter | Can be turned off |
+| 🎯 Automatic CV choice | 0–100% threshold |
+| 🛑 Limit control | ~200 applications a day |
+| 🧪 Test detector | iframe + triple check |
+| 🔄 Auto-return | URL + testRequired + test-description |
+| 🔒 Duplicate protection | Set + chrome.storage |
+| 🔄 SPA recovery | pushState/popstate/replaceState |
+| 💾 Manual backup | JSON export / import |
+| 📋 Session log | History of the last 30 runs |
 
-| Уровень | Механизм |
-|---------|----------|
-| 1 | Сетевой фильтр — fetch/XHR/WS/ES/Beacon |
-| 2 | Бинарное ядро — 26 WASM-функций |
-| 3 | Контроль потоков — MutationObserver + Worker |
-| 4 | Искажение отпечатков — WebGL/Canvas/Screen/Fonts |
-| 5 | Маскировка — задержки + humanScroll + mouse |
+## 🛡️ Protection — 5 lines of defence
 
-### БЛОКИРОВКА АДРЕСОВ
+| Level | Mechanism |
+|-------|-----------|
+| 1 | Network filter — fetch/XHR/WS/ES/Beacon |
+| 2 | Binary core — 26 WASM functions |
+| 3 | Flow control — MutationObserver + Worker |
+| 4 | Fingerprint distortion — WebGL/Canvas/Screen/Fonts |
+| 5 | Masking — delays + humanScroll + mouse |
 
-| Адрес | Статус |
-|-------|--------|
+### Address blocking
+
+| Address | Status |
+|---------|--------|
 | 127.0.0.1, localhost | 🚫 |
 | 192.168.x.x, 10.x.x.x | 🚫 |
 | ::1, fc00::/7, fd00::/7 | 🚫 |
 
-### БЛОКИРОВКА ТРЕКЕРОВ (32 домена)
+### Tracker blocking (32 domains)
 
-| Домен | Статус | Домен | Статус |
-|-------|--------|-------|--------|
+| Domain | Status | Domain | Status |
+|--------|--------|--------|--------|
 | targetads.io | 🚫 | weborama.ru | 🚫 |
 | hybrid.ai | 🚫 | appsflyer.com | 🚫 |
 | cpa.hh.ru | 🚫 | sentry.hh.ru | 🚫 |
@@ -94,57 +117,65 @@ HeadHunter удалил видео. На нём был просто бот бе�
 | skcrtxr.com | 🚫 | apptracer.ru | 🚫 |
 | cdn.uxfeedback.ru | 🚫 | tns-counter.ru | 🚫 |
 
-### ЗАЩИТА ОТ ЦИФРОВОГО СЛЕДА
+### Digital-trace protection
 
-| Вектор | Метод |
-|--------|-------|
-| Canvas | WASM-шум + кэш (5 сек) |
-| WebGL | Подмена GPU + 15 параметров |
-| Navigator | 11 свойств |
-| WebRTC | Фильтрация ICE-кандидатов |
-| Время | Джиттер ±0.1ms |
-| matchMedia | Под реальный экран |
-| Worker | Инжект профиля через postMessage |
-| Fonts | Белый список 18 шрифтов |
-| Intl | Подмена timezone/locale |
+| Vector | Method |
+|--------|--------|
+| Canvas | WASM noise + cache (5 s) |
+| WebGL | GPU spoofing + 15 parameters |
+| Navigator | 11 properties |
+| WebRTC | ICE candidate filtering |
+| Timing | Jitter ±0.1 ms |
+| matchMedia | Matched to the real screen |
+| Worker | Profile injected via postMessage |
+| Fonts | Allow-list of 18 fonts |
+| Intl | Timezone / locale spoofing |
 
-## 🎮 ПАНЕЛЬ УПРАВЛЕНИЯ
+## 🎮 Control panel
 
-| Кнопка | Функция |
-|--------|---------|
-| ▶️ Старт | Запуск |
-| 🧪 Тест | 1 вакансия |
-| ⏹️ Стоп | Остановка |
-| 📊 Анализ | Статистика |
-| 🔍 Тест фильтра | Проверка |
-| 🤖 Автофильтр | Список |
-| 🗑️ Очистить | Сброс |
-| 🧹 Очистить автофильтр | Сброс автофильтра |
-| 📤 Экспорт | Сохранить JSON |
-| 📥 Импорт | Восстановить JSON |
-| 📋 Лог | История сессий |
+| Button | Function |
+|--------|----------|
+| ▶️ Start | Run |
+| 🧪 Test | One vacancy |
+| ⏹️ Stop | Stop |
+| 📊 Analyse | Statistics |
+| 🔍 Test filter | Check |
+| 🤖 Auto-filter | List |
+| 🗑️ Clear | Reset |
+| 🧹 Clear auto-filter | Reset the auto-filter |
+| 📤 Export | Save JSON |
+| 📥 Import | Restore JSON |
+| 📋 Log | Session history |
 
-## ⚙️ НАСТРОЙКИ
+## ⚙️ Settings
 
-| Настройка | Диапазон |
-|-----------|----------|
-| Автопереход | Вкл/Выкл |
-| Пропуск откликнутых | Вкл/Выкл |
-| Фильтр организаций | текст |
-| Автофильтр | Вкл/Выкл |
-| Автовыбор резюме | Вкл/Выкл |
-| Порог совпадения | 0–100% |
-| Без письма | Вкл/Выкл |
-| Задержка | 0.3–5 сек |
-| Ночной режим | Вкл/Выкл + часы (0–23) |
+| Setting | Range |
+|---------|-------|
+| Auto page turn | On / off |
+| Skip already applied | On / off |
+| Company filter | text |
+| Auto-filter | On / off |
+| Automatic CV choice | On / off |
+| Match threshold | 0–100% |
+| No cover letter | On / off |
+| Delay | 0.3–5 s |
+| Night mode | On / off + hours (0–23) |
 
-## 📊 ТРЕБОВАНИЯ
+## 📊 Requirements
 
-| Параметр | Значение |
-|----------|----------|
-| Браузеры | Chrome 111+, Edge 111+, Opera 97+, Yandex Browser |
-| Лицензия | MIT |
+| Parameter | Value |
+|-----------|-------|
+| Browsers | Chrome 111+, Edge 111+, Opera 97+, Yandex Browser |
+| License | MIT |
 
-**Авторы:** ALEX | Siarhei Karnach
+## Contributing
 
-*hh.ru больше не собирает данные о вашем компьютере.*
+Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Found a security problem? [Report it privately](https://github.com/N0deZ3r0/hh-ru-job-automation-bot/security/advisories/new)
+rather than in a public issue.
+
+---
+
+**Authors:** ALEX | Siarhei Karnach
+
+*hh.ru no longer collects data about your computer.*
