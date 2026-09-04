@@ -1,4 +1,4 @@
-// ===== CORE.JS v2.3 — WASM + СЕТЕВАЯ ЗАЩИТА + CANVAS NOISE =====
+// ===== CORE.JS v2.4 — WASM + СЕТЕВАЯ ЗАЩИТА + CANVAS NOISE =====
 (function() {
     'use strict';
 
@@ -99,9 +99,19 @@
                 if (!len) return;
                 const p = safeMalloc(len);
                 try {
-                    for (let i = 0; i < len; i++) M.setValue(p + i, px[i], 'i8');
-                    M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
-                    for (let i = 0; i < len; i++) px[i] = M.getValue(p + i, 'i8') & 0xFF;
+                    // Быстрый путь через HEAPU8 — одно копирование вместо len вызовов setValue.
+                    // Heap перечитываем после вызова: WASM мог вырастить память.
+                    let heap = M.HEAPU8;
+                    if (heap && heap.length >= p + len) {
+                        heap.set(px, p);
+                        M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
+                        heap = M.HEAPU8;
+                        px.set(heap.subarray(p, p + len));
+                    } else {
+                        for (let i = 0; i < len; i++) M.setValue(p + i, px[i], 'i8');
+                        M._add_canvas_noise(p, imageData.width, imageData.height, imageData.width * 4, len);
+                        for (let i = 0; i < len; i++) px[i] = M.getValue(p + i, 'i8') & 0xFF;
+                    }
                 } finally {
                     M._free(p);
                 }
@@ -238,7 +248,8 @@
         };
         const oO = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function(m, url, ...a) {
-            this.__hh_url = url;
+            // FIX: url может быть объектом URL — isLocal() отбрасывал не-строки и пропускал запрос
+            this.__hh_url = (url === null || url === undefined) ? url : String(url);
             return oO.call(this, m, url, ...a);
         };
         const oS = XMLHttpRequest.prototype.send;
@@ -251,8 +262,10 @@
         };
         const OrigWebSocket = globalThis.WebSocket;
         // [FIX WebSocket Proxy] Используем Proxy — instanceof и прототипная цепочка корректны.
-        // [FIX WebSocket constants] Явные значения вместо forEach с индексом —
-        // предыдущий код случайно работал т.к. индексы совпадали со значениями констант.
+        // [FIX WebSocket constants] Константы (CONNECTING/OPEN/CLOSING/CLOSED) НЕ присваиваем:
+        // у нативного WebSocket они non-writable, и присваивание в strict mode бросало
+        // TypeError — весь try-блок обрывался, EventSource и sendBeacon оставались без защиты.
+        // Proxy и так форвардит чтение этих констант на оригинал.
         globalThis.WebSocket = new Proxy(OrigWebSocket, {
             construct(Target, args) {
                 const [url, protocols] = args;
@@ -262,10 +275,6 @@
                     : new Target(url);
             }
         });
-        globalThis.WebSocket.CONNECTING = 0;
-        globalThis.WebSocket.OPEN       = 1;
-        globalThis.WebSocket.CLOSING    = 2;
-        globalThis.WebSocket.CLOSED     = 3;
         const OrigEventSource = globalThis.EventSource;
         // [FIX EventSource Proxy] Используем Proxy — instanceof и прототипная цепочка корректны
         globalThis.EventSource = new Proxy(OrigEventSource, {
@@ -282,11 +291,20 @@
     } catch(e) {}
 
     // WebRTC защита
+    // FIX: раньше includes('10.') совпадал с любым адресом, содержащим "10." (1.2.10.3,
+    // 93.110.4.1 и т.д.) — легитимные кандидаты выбрасывались; а диапазон 172.16-31
+    // покрывался только для 172.16. Теперь адреса вырезаются из SDP и проверяются целиком.
+    const PRIVATE_V4 = /^(?:10\.|127\.|0\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/;
     function isPrivateCandidate(cand) {
-        if (!cand) return false;
-        return cand.includes('192.168.') || cand.includes('10.') || cand.includes('172.16.') ||
-               cand.includes('127.0.0.1') || cand.includes('::1') || cand.includes('fe80:') ||
-               /^fc[0-9a-f]{2}:|^fd[0-9a-f]{2}:/i.test(cand);
+        if (!cand || typeof cand !== 'string') return false;
+        const ips = cand.match(/(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f]*:[0-9a-f:]+/gi) || [];
+        for (const ip of ips) {
+            if (ip.indexOf(':') === -1) { if (PRIVATE_V4.test(ip)) return true; continue; }
+            const low = ip.toLowerCase();
+            if (low === '::1' || low === '::' || low.startsWith('fe80:') ||
+                /^f[cd][0-9a-f]{2}:/.test(low)) return true;
+        }
+        return false;
     }
     // [FIX RTCPeerConnection instanceof] Используем Proxy вместо ручной подстановки прототипа —
     // instanceof, Object.getPrototypeOf и статические свойства работают корректно.
@@ -340,34 +358,42 @@
         const OrigWorker = window.Worker;
         if (OrigWorker) {
             window.Worker = function(url, options) {
+                const payload = window.__hh_worker_data__;
+                // FIX: если инжектить нечего — не трогаем воркер вообще. Раньше шим
+                // заворачивал в blob: любой воркер, ломая self.location и относительные
+                // importScripts, при том что payload всегда был пустым.
+                if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) {
+                    return new OrigWorker(url, options);
+                }
+                // module-воркеры не умеют importScripts — шим к ним неприменим
+                if (options && options.type === 'module') return new OrigWorker(url, options);
+
                 const urlStr = (url instanceof URL) ? url.href : String(url);
-                // FIX: race condition — postMessage мог прийти до регистрации once-listener в воркере.
-                // Решение: воркер сначала отправляет 'hh-ready', main thread отвечает данными.
+                // FIX race condition: старый шим ждал данных от main-потока через
+                // addEventListener('message', ..., {once:true}). Первое же postMessage
+                // страницы срабатывало на этот слушатель, он снимался — и importScripts
+                // не вызывался никогда, воркер оставался пустым. Плюс служебное
+                // 'hh-ready' прилетало в onmessage самой страницы. Теперь данные вшиты
+                // в код шима, а исходный скрипт грузится синхронно при старте воркера.
                 const shimCode = [
-                    'self.addEventListener("message", function(e) {',
-                    '  if (e.data && e.data.__type === "hh-worker-data") {',
-                    '    try {',
-                    '      var ev = new CustomEvent("hh-inject-data", { detail: e.data.__payload });',
-                    '      self.dispatchEvent(ev);',
-                    '    } catch(_) {}',
-                    '    try { importScripts(' + JSON.stringify(urlStr) + '); } catch(_) {}',
-                    '  }',
-                    '}, { once: true });',
-                    'self.postMessage({ __type: "hh-ready" });'
+                    'self.__hh_worker_data__ = ' + JSON.stringify(payload) + ';',
+                    'try {',
+                    '  self.dispatchEvent(new CustomEvent("hh-inject-data", { detail: self.__hh_worker_data__ }));',
+                    '} catch(_) {}',
+                    'importScripts(' + JSON.stringify(urlStr) + ');'
                 ].join('\n');
                 const blob = new Blob([shimCode], { type: 'application/javascript' });
                 const blobUrl = URL.createObjectURL(blob);
-                const worker = new OrigWorker(blobUrl, options);
-                const payload = window.__hh_worker_data__ || {};
-                // [FIX blobUrl race] Отзываем URL только после 'hh-ready' — шим уже выполнен,
-                // importScripts вызван. setTimeout(1000) создавал гонку на медленных машинах.
-                worker.addEventListener('message', function onReady(e) {
-                    if (e.data && e.data.__type === 'hh-ready') {
-                        worker.removeEventListener('message', onReady);
-                        URL.revokeObjectURL(blobUrl);
-                        worker.postMessage({ __type: 'hh-worker-data', __payload: payload });
-                    }
-                });
+                let worker;
+                try {
+                    worker = new OrigWorker(blobUrl, options);
+                } catch(e) {
+                    URL.revokeObjectURL(blobUrl);
+                    return new OrigWorker(url, options);
+                }
+                // Скрипт уже забран конструктором — blob отзываем сразу, без
+                // setTimeout(1000), который держал память и создавал гонку.
+                URL.revokeObjectURL(blobUrl);
                 return worker;
             };
             // [FIX Worker Proxy] Прототипная цепочка через Object.setPrototypeOf —
